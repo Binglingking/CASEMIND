@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from backend.agents.query_agent import QueryAgent
+from backend.core.llm import LLMConfig
+from backend.services import legacy_service, output_service
+
+
+MAX_CONTENT_CHARS = 40000
+
+
+def _resolve_all_mentions(project: str, mentions: list[dict]) -> list[dict]:
+    blocks = []
+    for m in mentions:
+        mtype = (m.get("type") or "").lower()
+        if mtype == "legacy_case":
+            block = legacy_service.resolve_legacy_case_mention(project, m.get("file_id", ""))
+            if block:
+                blocks.append(block)
+        elif mtype == "legacy_xmind":
+            block = legacy_service.resolve_legacy_xmind_mention(project, m.get("file_id", ""))
+            if block:
+                blocks.append(block)
+        elif mtype == "doc":
+            path = m.get("path", "")
+            try:
+                from backend.core.parser import parse_file
+                p = Path(path)
+                content = parse_file(p) if p.exists() else ""
+            except Exception:
+                content = ""
+            truncated = len(content) > MAX_CONTENT_CHARS
+            blocks.append({
+                "label": m.get("name", Path(path).name),
+                "name": m.get("name", Path(path).name),
+                "content": content[:MAX_CONTENT_CHARS],
+                "truncated": truncated,
+            })
+        elif mtype == "output":
+            kind = m.get("kind", "")
+            filename = m.get("filename", "")
+            try:
+                data = output_service.read_output_content(project, kind, filename)
+                if isinstance(data.get("data"), dict):
+                    content = json.dumps(data["data"], ensure_ascii=False, indent=2)
+                elif data.get("markdown"):
+                    content = data["markdown"]
+                else:
+                    content = json.dumps(data, ensure_ascii=False, indent=2)
+            except Exception:
+                content = ""
+            truncated = len(content) > MAX_CONTENT_CHARS
+            blocks.append({
+                "label": filename,
+                "name": filename,
+                "content": content[:MAX_CONTENT_CHARS],
+                "truncated": truncated,
+            })
+    return blocks
+
+
+def query(project: str, question: str, mode: str, llm_cfg: LLMConfig,
+          top_k: int | None = None,
+          history: list[dict] | None = None,
+          mentions: list[dict] | None = None) -> dict:
+    resolved = _resolve_all_mentions(project, mentions or [])
+    return QueryAgent(project).run(
+        question=question, mode=mode, llm_cfg=llm_cfg, top_k=top_k,
+        history=history or [],
+        reference_blocks=resolved,
+    )

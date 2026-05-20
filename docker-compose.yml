@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: casemind-backend
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./docs:/app/docs
+      - ./memory:/app/memory
+      - ./vector_store:/app/vector_store
+      - ./outputs:/app/outputs
+      - ./prompts:/app/prompts
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: casemind-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend

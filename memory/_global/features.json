@@ -1,0 +1,12 @@
+{
+  "enable_knowledge_extraction": true,
+  "enable_hybrid_retrieval": true,
+  "enable_case_gen_pipeline": false,
+  "enable_coverage_report": false,
+  "enable_conflict_detection": false,
+  "enable_feedback_loop": true,
+  "enable_reranker": true,
+  "enable_legacy_style_reference": true,
+  "enable_legacy_inference": true,
+  "enable_legacy_inference_auto_accept": true
+}

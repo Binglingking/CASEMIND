@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CaseMind - 输出与导出</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Space+Grotesk:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#c9a74d",
+                        "on-secondary-container": "#bfb2da",
+                        "surface-container": "#211f24",
+                        "error-container": "#93000a",
+                        "outline-variant": "#494551",
+                        "primary-fixed": "#e9ddff",
+                        "error": "#ffb4ab",
+                        "secondary": "#cdc0e9",
+                        "on-surface": "#e6e0e9",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary-fixed-variant": "#594400",
+                        "on-surface-variant": "#cbc4d2",
+                        "surface": "#141218",
+                        "on-secondary": "#342b4b",
+                        "surface-variant": "#36343a",
+                        "secondary-container": "#4d4465",
+                        "surface-container-high": "#2b292f",
+                        "on-tertiary": "#3e2e00",
+                        "on-primary-fixed-variant": "#4f378a",
+                        "on-primary-fixed": "#22005d",
+                        "surface-tint": "#cfbcff",
+                        "primary": "#cfbcff",
+                        "on-primary-container": "#e0d2ff",
+                        "tertiary": "#e7c365",
+                        "primary-fixed-dim": "#cfbcff",
+                        "secondary-fixed-dim": "#cdc0e9",
+                        "surface-bright": "#3b383e",
+                        "on-tertiary-fixed": "#241a00",
+                        "on-secondary-fixed-variant": "#4b4263",
+                        "inverse-surface": "#e6e0e9",
+                        "outline": "#948e9c",
+                        "surface-container-lowest": "#0f0d13",
+                        "on-secondary-fixed": "#1f1635",
+                        "inverse-on-surface": "#322f35",
+                        "inverse-primary": "#6750a4",
+                        "on-error": "#690005",
+                        "secondary-fixed": "#e9ddff",
+                        "background": "#141218",
+                        "tertiary-fixed": "#ffdf93",
+                        "tertiary-fixed-dim": "#e7c365",
+                        "surface-dim": "#141218",
+                        "on-primary": "#381e72",
+                        "surface-container-highest": "#36343a",
+                        "primary-container": "#6750a4",
+                        "surface-container-low": "#1d1b20",
+                        "on-background": "#e6e0e9",
+                        "on-tertiary-container": "#503d00"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sm": "8px",
+                        "gutter": "24px",
+                        "margin": "32px",
+                        "md": "16px",
+                        "unit": "4px",
+                        "lg": "24px",
+                        "xl": "40px",
+                        "xs": "4px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Manrope"],
+                        "h1": ["Manrope"],
+                        "label-caps": ["Space Grotesk"],
+                        "body-lg": ["Manrope"],
+                        "body-md": ["Manrope"],
+                        "display": ["Manrope"]
+                    },
+                    "fontSize": {
+                        "h2": ["24px", { "lineHeight": "1.3", "letterSpacing": "0em", "fontWeight": "600" }],
+                        "h1": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "label-caps": ["12px", { "lineHeight": "1.5", "letterSpacing": "0.1em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "display": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(16, 20, 29, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .glow-active {
+            box-shadow: 0 0 15px rgba(207, 188, 255, 0.15);
+        }
+        .glow-hover:hover {
+            box-shadow: 0 0 20px rgba(207, 188, 255, 0.2);
+            transform: scale(1.02);
+        }
+        /* Custom Scrollbar for inner elements */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(207, 188, 255, 0.2);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(207, 188, 255, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-background font-body-md min-h-screen flex overflow-hidden">
+<!-- SideNavBar (from JSON) -->
+<nav class="fixed left-0 top-0 h-full flex flex-col py-8 bg-surface-container-lowest backdrop-blur-2xl border-r border-white/5 shadow-2xl h-screen w-64 z-40 hidden md:flex">
+<div class="px-6 mb-12 flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center glow-active">
+<span class="material-symbols-outlined text-on-primary-container font-bold">diamond</span>
+</div>
+<div>
+<h1 class="font-h2 text-h2 font-black tracking-tighter text-primary">CaseMind</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant">稳定版本 V1.2.0</p>
+</div>
+</div>
+<div class="flex-1 px-4 space-y-2">
+<!-- Inactive -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">folder_shared</span>
+<span class="font-body-md text-body-md">项目管理</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">account_tree</span>
+<span class="font-body-md text-body-md">目录管理</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">memory</span>
+<span class="font-body-md text-body-md">记忆面板</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">psychology</span>
+<span class="font-body-md text-body-md">AI 交互</span>
+</a>
+<!-- Active (Match Intent: 输出展示) -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary-container/20 text-primary border-l-4 border-primary shadow-[4px_0_12px_rgba(207,188,255,0.1)]" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">output</span>
+<span class="font-body-md text-body-md">输出展示</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 mt-auto" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">settings</span>
+<span class="font-body-md text-body-md">设置</span>
+</a>
+</div>
+<div class="px-6 mt-8">
+<div class="flex items-center gap-3 p-3 rounded-xl bg-surface-container-low border border-outline-variant/30">
+<img alt="用户头像" class="w-10 h-10 rounded-full object-cover" data-alt="Close up portrait of a young professional woman in soft studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrZUDlQWF4TgkRoGNTKVq6PPeMeGuEB4wub1F9-d38EDkFcPFm31L8hZFGrb38Cj8JbfIWflszAZd8zfGP1L8d_rGOduLUkAeTBHBJxhenTxSuR6H2OW4WxpE9tcecvNAYbiPIppnJZ1q1Jq7SdP_QgwC4mCjxstCtZ3aGWcf1svZOq4vhhiCwvVxc-oK2F-jaR84MyrXg1a8Lleub8i-bpRGjvcjRrbeyZ6XGyHHyhQWy2sYvJ1AGxgF_cJyacYnoeIQttPdMvw"/>
+<div>
+<p class="font-body-md text-body-md font-medium text-on-surface">Alex Chen</p>
+<p class="font-label-caps text-label-caps text-primary">专业版</p>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 ml-0 md:ml-64 h-screen flex flex-col relative">
+<!-- TopNavBar (Mobile Only based on layout logic, but JSON specifies fixed full-width. Adapting for responsive hybrid) -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-surface-container-lowest/70 backdrop-blur-xl border-b border-white/10 shadow-[0_0_15px_rgba(207,188,255,0.05)] md:hidden">
+<div class="text-xl font-bold text-primary font-['Manrope'] tracking-tight">CaseMind</div>
+<div class="flex gap-4 text-primary">
+<span class="material-symbols-outlined hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 rounded p-1 cursor-pointer">account_tree</span>
+<span class="material-symbols-outlined hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 rounded p-1 cursor-pointer">history_edu</span>
+<span class="material-symbols-outlined hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 rounded p-1 cursor-pointer">developer_board</span>
+</div>
+</header>
+<!-- Decorative Background Gradient -->
+<div class="absolute top-[-20%] right-[-10%] w-[60%] h-[60%] rounded-full bg-primary/5 blur-[120px] pointer-events-none"></div>
+<div class="absolute bottom-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-secondary/5 blur-[100px] pointer-events-none"></div>
+<div class="flex-1 p-margin mt-16 md:mt-0 overflow-y-auto">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-margin gap-4">
+<div>
+<h2 class="font-h1 text-h1 text-on-surface mb-2">输出与导出</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">查看生成结果，并以多种格式导出您的测试用例资产。</p>
+</div>
+<div class="flex gap-md">
+<button class="flex items-center gap-2 px-6 py-3 rounded-lg border border-primary/30 text-primary font-body-md text-body-md glass-panel glow-hover transition-all">
+<span class="material-symbols-outlined text-[20px]">data_object</span>
+                        下载 JSON
+                    </button>
+<button class="flex items-center gap-2 px-6 py-3 rounded-lg bg-primary text-on-primary font-body-md text-body-md font-medium glow-hover transition-all">
+<span class="material-symbols-outlined text-[20px]">table_chart</span>
+                        导出 Excel
+                    </button>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter h-[calc(100vh-200px)] min-h-[600px]">
+<!-- Left Panel: Test Case Table (8 cols) -->
+<div class="lg:col-span-8 flex flex-col glass-panel rounded-xl border border-white/5 overflow-hidden relative">
+<!-- Subtle top gradient border -->
+<div class="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-primary/50 to-transparent"></div>
+<div class="p-lg border-b border-white/5 flex justify-between items-center bg-surface-container-lowest/50">
+<h3 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">view_list</span>
+                            测试用例清单
+                        </h3>
+<div class="flex items-center gap-2 bg-surface-container py-1 px-3 rounded-full border border-white/5">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">共 24 条记录</span>
+</div>
+</div>
+<div class="flex-1 overflow-auto p-4">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr>
+<th class="font-label-caps text-label-caps text-on-surface-variant pb-4 px-4 font-medium sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10 border-b border-white/5">用例编号</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant pb-4 px-4 font-medium sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10 border-b border-white/5">所属模块</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant pb-4 px-4 font-medium sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10 border-b border-white/5">测试标题</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant pb-4 px-4 font-medium sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10 border-b border-white/5">优先级</th>
+<th class="font-label-caps text-label-caps text-on-surface-variant pb-4 px-4 font-medium sticky top-0 bg-surface-container-lowest/90 backdrop-blur-md z-10 border-b border-white/5">预期结果</th>
+</tr>
+</thead>
+<tbody class="font-body-md text-body-md text-on-surface">
+<!-- Row 1 -->
+<tr class="hover:bg-white/[0.03] transition-colors group cursor-pointer border-b border-white/[0.02]">
+<td class="py-4 px-4 font-mono text-sm text-primary/70">TC-001</td>
+<td class="py-4 px-4">用户认证</td>
+<td class="py-4 px-4 font-medium">使用有效凭证登录系统</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center px-2 py-1 rounded bg-error/10 text-error font-label-caps text-label-caps">P0 - 阻塞</span>
+</td>
+<td class="py-4 px-4 text-on-surface-variant truncate max-w-[200px]">系统跳转至仪表盘页面，右上角显示用户信息</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-white/[0.03] transition-colors group cursor-pointer border-b border-white/[0.02]">
+<td class="py-4 px-4 font-mono text-sm text-primary/70">TC-002</td>
+<td class="py-4 px-4">用户认证</td>
+<td class="py-4 px-4 font-medium">密码错误次数超过限制</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center px-2 py-1 rounded bg-tertiary/10 text-tertiary font-label-caps text-label-caps">P1 - 高</span>
+</td>
+<td class="py-4 px-4 text-on-surface-variant truncate max-w-[200px]">提示账户锁定，并发送解锁邮件至注册邮箱</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-white/[0.03] transition-colors group cursor-pointer border-b border-white/[0.02]">
+<td class="py-4 px-4 font-mono text-sm text-primary/70">TC-003</td>
+<td class="py-4 px-4">数据管理</td>
+<td class="py-4 px-4 font-medium">导出超大数据集 (10万+)</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center px-2 py-1 rounded bg-primary/10 text-primary font-label-caps text-label-caps">P2 - 中</span>
+</td>
+<td class="py-4 px-4 text-on-surface-variant truncate max-w-[200px]">转入后台异步任务，界面显示进度条，完成后通知</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-white/[0.03] transition-colors group cursor-pointer border-b border-white/[0.02]">
+<td class="py-4 px-4 font-mono text-sm text-primary/70">TC-004</td>
+<td class="py-4 px-4">界面交互</td>
+<td class="py-4 px-4 font-medium">折叠侧边栏状态持久化</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center px-2 py-1 rounded bg-outline/10 text-outline font-label-caps text-label-caps">P3 - 低</span>
+</td>
+<td class="py-4 px-4 text-on-surface-variant truncate max-w-[200px]">刷新页面后，侧边栏保持折叠状态</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Right Panel: XMind Structure Preview (4 cols) -->
+<div class="lg:col-span-4 flex flex-col glass-panel rounded-xl border border-white/5 overflow-hidden relative">
+<div class="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-secondary/50 to-transparent"></div>
+<div class="p-lg border-b border-white/5 bg-surface-container-lowest/50 flex justify-between items-center">
+<h3 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">account_tree</span>
+                            结构预览
+                        </h3>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">open_in_full</span>
+</button>
+</div>
+<div class="flex-1 p-lg overflow-auto bg-surface-container-low/40 font-mono text-sm leading-relaxed text-on-surface-variant">
+<!-- Markdown Tree Simulation -->
+<div class="text-primary mb-2 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">folder</span>
+<strong># 电商核心业务测试用例</strong>
+</div>
+<div class="ml-4 border-l border-white/10 pl-4 py-1">
+<div class="mb-2">
+<div class="text-secondary flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]">account_box</span>
+                                    ## 1. 用户模块
+                                </div>
+<div class="ml-4 border-l border-white/10 pl-4 py-1">
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [登录] 正常账号密码登录</div>
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [登录] 密码错误超限</div>
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [注册] 手机号已被注册验证</div>
+</div>
+</div>
+<div class="mb-2">
+<div class="text-secondary flex items-center gap-2 mt-2">
+<span class="material-symbols-outlined text-[16px]">shopping_cart</span>
+                                    ## 2. 交易模块
+                                </div>
+<div class="ml-4 border-l border-white/10 pl-4 py-1">
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [购物车] 添加同款商品不同规格</div>
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [订单] 结算时库存不足提示</div>
+<div class="text-on-surface hover:text-white transition-colors cursor-default py-1">- [支付] 支付超时取消订单</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-white/5 bg-surface-container-lowest/80 flex justify-center">
+<button class="w-full py-2 rounded border border-secondary/30 text-secondary hover:bg-secondary/10 transition-colors font-body-md text-body-md flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                             导出 XMind
+                         </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

@@ -1,0 +1,37 @@
+{
+  "name": "casemind-desktop",
+  "version": "0.1.0",
+  "description": "CaseMind Windows desktop client",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ai.casemind.desktop",
+    "productName": "CaseMind",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "web/**/*"
+    ],
+    "extraResources": [
+      { "from": "bin/casemind-backend.exe", "to": "bin/casemind-backend.exe" }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

@@ -1,0 +1,95 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Node
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# CaseMind - 个人数据和生成文件
+# ========================================
+
+# AI 记忆和知识库（保留目录结构）
+memory/*/builds/
+memory/*/kp_cache/
+memory/*/per_doc/
+memory/*/legacy/
+memory/*/versions/
+memory/*/references/
+memory/*/knowledge_points.json
+memory/*/knowledge_points.seq.json
+memory/*/conflicts.json
+memory/*/conflicts.seq.json
+memory/*/feedback.json
+memory/*/feedback.seq.json
+memory/*/file_index.json
+memory/*/folders.json
+memory/*/project.json
+memory/*/memory.md
+memory/*/memory_prompt.txt
+memory/*/chunks.jsonl
+memory/*/.analysis_cache.json
+
+# 向量索引
+vector_store/*.faiss
+vector_store/*.npy
+vector_store/*.bm25.chunks.pkl
+vector_store/*.meta.jsonl
+!vector_store/.gitkeep
+
+# 输出文件
+outputs/xmind/*/
+outputs/testcases/*/
+outputs/**/*.json
+outputs/**/*.md
+
+# 原始文档（用户自己的业务文档）
+docs/AI用例/
+docs/design/
+docs/国内GM平台/
+docs/投放管理平台/
+docs/风格参考/
+docs/*.docx
+docs/*.xlsx
+docs/*.pdf
+docs/*.txt
+
+# Claude 配置
+.claude/
+
+# 测试报告和临时文件
+rate_limit_report*.json
+test_report*.json
+test_report.html
+debug_*.py
+sync_*.py
+test*.py
+!backend/tests/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini

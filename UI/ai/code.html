@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>智案系统 - AI 交互</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Space+Grotesk:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-container": "#c9a74d",
+                        "on-secondary-container": "#bfb2da",
+                        "surface-container": "#211f24",
+                        "error-container": "#93000a",
+                        "outline-variant": "#494551",
+                        "primary-fixed": "#e9ddff",
+                        "error": "#ffb4ab",
+                        "secondary": "#cdc0e9",
+                        "on-surface": "#e6e0e9",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary-fixed-variant": "#594400",
+                        "on-surface-variant": "#cbc4d2",
+                        "surface": "#141218",
+                        "on-secondary": "#342b4b",
+                        "surface-variant": "#36343a",
+                        "secondary-container": "#4d4465",
+                        "surface-container-high": "#2b292f",
+                        "on-tertiary": "#3e2e00",
+                        "on-primary-fixed-variant": "#4f378a",
+                        "on-primary-fixed": "#22005d",
+                        "surface-tint": "#cfbcff",
+                        "primary": "#cfbcff",
+                        "on-primary-container": "#e0d2ff",
+                        "tertiary": "#e7c365",
+                        "primary-fixed-dim": "#cfbcff",
+                        "secondary-fixed-dim": "#cdc0e9",
+                        "surface-bright": "#3b383e",
+                        "on-tertiary-fixed": "#241a00",
+                        "on-secondary-fixed-variant": "#4b4263",
+                        "inverse-surface": "#e6e0e9",
+                        "outline": "#948e9c",
+                        "surface-container-lowest": "#0f0d13",
+                        "on-secondary-fixed": "#1f1635",
+                        "inverse-on-surface": "#322f35",
+                        "inverse-primary": "#6750a4",
+                        "on-error": "#690005",
+                        "secondary-fixed": "#e9ddff",
+                        "background": "#141218",
+                        "tertiary-fixed": "#ffdf93",
+                        "tertiary-fixed-dim": "#e7c365",
+                        "surface-dim": "#141218",
+                        "on-primary": "#381e72",
+                        "surface-container-highest": "#36343a",
+                        "primary-container": "#6750a4",
+                        "surface-container-low": "#1d1b20",
+                        "on-background": "#e6e0e9",
+                        "on-tertiary-container": "#503d00"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sm": "8px",
+                        "gutter": "24px",
+                        "margin": "32px",
+                        "md": "16px",
+                        "unit": "4px",
+                        "lg": "24px",
+                        "xl": "40px",
+                        "xs": "4px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Manrope"],
+                        "h1": ["Manrope"],
+                        "label-caps": ["Space Grotesk"],
+                        "body-lg": ["Manrope"],
+                        "body-md": ["Manrope"],
+                        "display": ["Manrope"]
+                    },
+                    "fontSize": {
+                        "h2": ["24px", { "lineHeight": "1.3", "letterSpacing": "0em", "fontWeight": "600" }],
+                        "h1": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "label-caps": ["12px", { "lineHeight": "1.5", "letterSpacing": "0.1em", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400" }],
+                        "display": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom scrollbar for an ethereal feel */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(203, 196, 210, 0.1);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(203, 196, 210, 0.2);
+        }
+        
+        /* Glass details marker reset */
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar Component -->
+<header class="bg-surface/80 backdrop-blur-xl font-['Manrope'] tracking-tight fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 border-b border-white/10 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+<!-- Logo Area matches TopNavBar but shifted to avoid overlap with fixed SideNav if desired. We keep layout strict. -->
+<div class="flex items-center gap-4 ml-64 pl-6">
+<div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+<span class="material-symbols-outlined text-primary">hive</span>
+</div>
+<span class="text-xl font-bold text-on-surface">智案系统</span>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 p-2 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined">account_tree</span>
+</button>
+<button class="hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 p-2 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined">history_edu</span>
+</button>
+<button class="hover:text-white hover:bg-white/5 transition-all scale-105 duration-300 p-2 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined">developer_board</span>
+</button>
+</div>
+<!-- User Avatar Mock -->
+<div class="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 border border-white/20 p-[2px]">
+<div class="w-full h-full rounded-full bg-surface-container flex items-center justify-center text-xs font-bold text-primary">用</div>
+</div>
+</div>
+</header>
+<!-- SideNavBar Component -->
+<nav class="bg-surface-container-low/80 backdrop-blur-2xl font-['Manrope'] antialiased h-screen w-64 border-r border-white/5 shadow-2xl fixed left-0 top-0 flex flex-col py-8 z-[60]">
+<!-- Brand Header within SideNav as per JSON -->
+<div class="px-6 mb-10 flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+<span class="material-symbols-outlined text-primary">hive</span>
+</div>
+<h1 class="font-bold tracking-tight text-on-surface text-xl">智案系统</h1>
+</div>
+<span class="text-xs text-on-surface-variant">V1.2.0 稳定版</span>
+</div>
+<div class="flex flex-col gap-2 px-3 flex-1">
+<!-- Items 0-2: Inactive -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">folder_shared</span>
+<span class="font-medium">项目管理</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">account_tree</span>
+<span class="font-medium">目录管理</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">memory</span>
+<span class="font-medium">记忆面板</span>
+</a>
+<!-- Item 3: Active ("AI 交互") -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary/10 text-primary border-l-4 border-primary shadow-[4px_0_12px_rgba(207,188,255,0.1)] hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">psychology</span>
+<span class="font-medium">AI 交互</span>
+</a>
+<!-- Items 4-5: Inactive -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">output</span>
+<span class="font-medium">输出展示</span>
+</a>
+<div class="mt-auto">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-all duration-200 hover:translate-x-1 group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">settings</span>
+<span class="font-medium">设置</span>
+</a>
+</div>
+</div>
+</nav>
+<!-- Main Application Area -->
+<main class="ml-64 pt-16 h-screen flex relative z-10">
+<!-- Left: Conversation History List -->
+<aside class="w-80 border-r border-white/5 bg-surface-container-lowest/50 flex flex-col h-full backdrop-blur-sm">
+<div class="p-6 flex justify-between items-center border-b border-white/5">
+<h2 class="font-h2 text-h2 text-on-surface">会话记录</h2>
+<button class="w-10 h-10 rounded-full bg-primary-container/10 border border-primary/20 flex items-center justify-center text-primary hover:bg-primary-container/20 hover:scale-105 transition-all shadow-[0_0_10px_rgba(207,188,255,0.05)]">
+<span class="material-symbols-outlined">edit_square</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+<!-- Group: Today -->
+<div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-3 px-2">今天</h3>
+<div class="flex flex-col gap-1">
+<button class="w-full text-left p-3 rounded-lg bg-surface-container-high/50 border border-white/5 flex flex-col gap-1 hover:bg-surface-container-highest transition-colors group">
+<span class="font-body-md text-body-md text-on-surface truncate pr-4">登录模块异常流测试用例生成</span>
+<span class="font-body-md text-[13px] text-on-surface-variant truncate opacity-70">基于 auth_service.js 梳理边界条件...</span>
+</button>
+<button class="w-full text-left p-3 rounded-lg hover:bg-surface-container-high/30 border border-transparent hover:border-white/5 flex flex-col gap-1 transition-colors group">
+<span class="font-body-md text-body-md text-on-surface-variant group-hover:text-on-surface truncate pr-4">解析支付回调接口文档</span>
+<span class="font-body-md text-[13px] text-on-surface-variant truncate opacity-50">提取关键字段和校验逻辑</span>
+</button>
+</div>
+</div>
+<!-- Group: Previous -->
+<div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-3 px-2">过去 7 天</h3>
+<div class="flex flex-col gap-1">
+<button class="w-full text-left p-3 rounded-lg hover:bg-surface-container-high/30 border border-transparent hover:border-white/5 flex flex-col gap-1 transition-colors group">
+<span class="font-body-md text-body-md text-on-surface-variant group-hover:text-on-surface truncate pr-4">购物车微服务架构 XMind</span>
+<span class="font-body-md text-[13px] text-on-surface-variant truncate opacity-50">整理各个服务间的依赖关系</span>
+</button>
+<button class="w-full text-left p-3 rounded-lg hover:bg-surface-container-high/30 border border-transparent hover:border-white/5 flex flex-col gap-1 transition-colors group">
+<span class="font-body-md text-body-md text-on-surface-variant group-hover:text-on-surface truncate pr-4">用户权限表结构优化建议</span>
+<span class="font-body-md text-[13px] text-on-surface-variant truncate opacity-50">RBAC 模型设计探讨</span>
+</button>
+</div>
+</div>
+</div>
+</aside>
+<!-- Middle: Dialogue Area -->
+<section class="flex-1 flex flex-col h-full relative bg-background">
+<!-- Mode Switcher (Header) -->
+<div class="h-20 flex items-center justify-center border-b border-white/5 px-margin bg-background/50 backdrop-blur-md">
+<div class="flex bg-surface-container-low rounded-full p-1 border border-white/5 shadow-[0_0_20px_rgba(0,0,0,0.2)]">
+<button class="px-6 py-2 rounded-full font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface transition-colors">
+                        问答
+                    </button>
+<button class="px-6 py-2 rounded-full font-label-caps text-label-caps bg-primary-container/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(103,80,164,0.15)] transition-all">
+                        生成测试用例
+                    </button>
+<button class="px-6 py-2 rounded-full font-label-caps text-label-caps text-on-surface-variant hover:text-on-surface transition-colors">
+                        生成 XMind
+                    </button>
+</div>
+</div>
+<!-- Chat Message Area -->
+<div class="flex-1 overflow-y-auto px-margin py-xl flex flex-col gap-10 pb-40">
+<!-- User Message -->
+<div class="flex justify-end w-full">
+<div class="max-w-[70%] bg-surface-container-high border border-white/10 rounded-2xl rounded-tr-sm p-5 shadow-lg backdrop-blur-sm">
+<p class="font-body-lg text-body-lg text-on-surface leading-relaxed">
+                            请基于我们昨天上传的 <span class="text-primary bg-primary/10 px-2 py-0.5 rounded border border-primary/20 text-sm">OrderService.java</span> 和需求文档，针对“订单取消”这部分逻辑，生成边界条件的测试用例。重点关注高并发下的状态流转。
+                        </p>
+</div>
+</div>
+<!-- AI Message -->
+<div class="flex w-full gap-4 max-w-[85%]">
+<!-- AI Avatar Glow -->
+<div class="w-10 h-10 shrink-0 rounded-full bg-surface-container border border-primary/30 flex items-center justify-center relative shadow-[0_0_15px_rgba(207,188,255,0.2)]">
+<span class="material-symbols-outlined text-primary text-xl" style="font-variation-settings: 'FILL' 1;">neurology</span>
+<div class="absolute -inset-1 bg-primary/20 rounded-full blur-sm -z-10"></div>
+</div>
+<div class="flex-1 flex flex-col gap-4">
+<!-- Collapsible Thinking Process -->
+<details class="group bg-surface-container-lowest/40 border border-white/5 rounded-xl overflow-hidden [&amp;_summary::-webkit-details-marker]:hidden">
+<summary class="flex items-center gap-2 px-4 py-3 cursor-pointer select-none hover:bg-white/5 transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant text-sm transition-transform duration-300 group-open:rotate-90">chevron_right</span>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+<span class="font-body-md text-[14px] text-on-surface-variant italic">深度思考过程</span>
+</div>
+<span class="font-body-md text-[12px] text-outline ml-auto">已耗时 4.2s</span>
+</summary>
+<div class="px-5 pb-4 pt-1 border-t border-white/5 text-on-surface-variant font-body-md text-sm leading-relaxed flex flex-col gap-2">
+<p>1. 分析目标：针对 `OrderService.java` 中的订单取消逻辑生成测试用例，包含并发边界。</p>
+<p>2. 检索上下文：查阅工作区中的需求文档 v2.1 节 "订单状态机" 以及源码中 `cancelOrder(String orderId, String reason)` 方法。</p>
+<p>3. 识别关键状态：INIT -&gt; PENDING_PAY -&gt; PAID -&gt; CANCELLED (由用户或系统超时触发)。高并发易错点在 PENDING_PAY 到 PAID 或 CANCELLED 的竞态条件。</p>
+<p>4. 构造测试场景：正向流程、异常流（订单已支付/已取消/不存在）、并发取消与支付、超时自动取消与用户手动取消竞态。</p>
+<p>5. 格式化输出：使用 Markdown 表格形式呈现测试用例，符合“生成测试用例”模式的规范。</p>
+</div>
+</details>
+<!-- Main Answer Body -->
+<div class="prose prose-invert prose-p:text-on-surface prose-p:font-body-lg prose-p:leading-relaxed max-w-none">
+<p>基于提供的 <code>OrderService.java</code> 及需求文档，我已为您梳理出“订单取消”模块的核心边界条件及高并发场景测试用例。该模块的核心在于状态机的幂等性控制。</p>
+<!-- Simulating an elegant table output with divs for better styling control within the design system -->
+<div class="mt-6 border border-white/10 rounded-xl overflow-hidden bg-surface-container/30">
+<div class="grid grid-cols-12 bg-surface-container-high/50 px-4 py-3 border-b border-white/5 font-label-caps text-label-caps text-on-surface-variant">
+<div class="col-span-2">用例编号</div>
+<div class="col-span-3">测试场景</div>
+<div class="col-span-4">前置条件 &amp; 操作</div>
+<div class="col-span-3">预期结果</div>
+</div>
+<div class="grid grid-cols-12 px-4 py-4 border-b border-white/5 font-body-md text-sm text-on-surface hover:bg-white/[0.02] transition-colors">
+<div class="col-span-2 text-outline-variant">TC-CANC-01</div>
+<div class="col-span-3 font-medium">正常取消-待支付状态</div>
+<div class="col-span-4 text-on-surface-variant">订单状态=PENDING_PAY, 发起取消请求</div>
+<div class="col-span-3">状态更新为 CANCELLED, 释放库存锁</div>
+</div>
+<div class="grid grid-cols-12 px-4 py-4 border-b border-white/5 font-body-md text-sm text-on-surface hover:bg-white/[0.02] transition-colors">
+<div class="col-span-2 text-outline-variant">TC-CANC-05</div>
+<div class="col-span-3 font-medium text-error">并发-支付与取消竞态</div>
+<div class="col-span-4 text-on-surface-variant">同一订单几乎同时收到支付成功回调和用户取消请求</div>
+<div class="col-span-3">依赖 DB 乐观锁(version), 仅一操作成功。若取消先成功，触发退款流。</div>
+</div>
+<div class="grid grid-cols-12 px-4 py-4 font-body-md text-sm text-on-surface hover:bg-white/[0.02] transition-colors">
+<div class="col-span-2 text-outline-variant">TC-CANC-06</div>
+<div class="col-span-3 font-medium">幂等性-重复提交取消请求</div>
+<div class="col-span-4 text-on-surface-variant">网络延迟导致客户端连续发送两次取消请求</div>
+<div class="col-span-3">第一次成功，第二次返回 "订单已处理"，不抛异常。</div>
+</div>
+</div>
+</div>
+<!-- Collapsible Document Citations -->
+<div class="mt-2 flex flex-wrap gap-3">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-primary/20 bg-primary/5 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer shadow-[0_0_10px_rgba(207,188,255,0.02)]">
+<span class="material-symbols-outlined text-primary text-sm">description</span>
+<span class="font-body-md text-[13px] text-on-surface">OrderService.java</span>
+<span class="text-outline-variant text-[12px] ml-1">行 142-185</span>
+</div>
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/10 bg-surface-container-lowest hover:border-white/20 transition-all cursor-pointer">
+<span class="material-symbols-outlined text-on-surface-variant text-sm">article</span>
+<span class="font-body-md text-[13px] text-on-surface">交易链路需求文档 v2.1</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Input Area (Footer) -->
+<div class="absolute bottom-0 left-0 w-full px-margin pb-xl pt-10 bg-gradient-to-t from-background via-background to-transparent z-20 pointer-events-none">
+<div class="pointer-events-auto max-w-4xl mx-auto">
+<!-- Typing Effect Indicator (Static representation as requested) -->
+<div class="pl-4 pb-2 flex items-center gap-2 opacity-70">
+<span class="material-symbols-outlined text-primary text-sm animate-spin" style="animation-duration: 3s;">astrophotography_off</span>
+<span class="font-body-md text-sm text-primary bg-gradient-to-r from-primary to-cyan-400 bg-clip-text text-transparent">AI 正在组织高阶测试逻辑...</span>
+</div>
+<div class="bg-surface-container/60 backdrop-blur-xl border border-white/10 rounded-2xl p-2 shadow-[0_8px_32px_rgba(0,0,0,0.4)] relative flex flex-col focus-within:border-primary/50 focus-within:shadow-[0_0_20px_rgba(99,102,241,0.1)] transition-all duration-300">
+<!-- Textarea -->
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-on-surface font-body-lg resize-none min-h-[80px] p-4 placeholder:text-on-surface-variant/50" placeholder="描述你需要生成的内容，或输入 '/' 唤出快捷指令..."></textarea>
+<!-- Tool Actions & Submit -->
+<div class="flex justify-between items-center px-2 pb-2 mt-2">
+<div class="flex items-center gap-1 text-on-surface-variant">
+<button class="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-xl">attach_file</span>
+</button>
+<button class="w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-xl">language</span>
+</button>
+<div class="h-5 w-[1px] bg-white/10 mx-1"></div>
+<div class="px-3 py-1 rounded-full border border-white/5 bg-surface-container-lowest text-xs flex items-center gap-1 cursor-pointer hover:border-white/20">
+<span class="w-2 h-2 rounded-full bg-tertiary"></span>
+<span>深度模型 v4.0</span>
+</div>
+</div>
+<button class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary shadow-[0_0_15px_rgba(207,188,255,0.4)] hover:scale-105 hover:shadow-[0_0_20px_rgba(207,188,255,0.6)] transition-all duration-300">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">send</span>
+</button>
+</div>
+</div>
+<div class="text-center mt-3 text-xs text-outline-variant font-label-caps tracking-widest">
+                        AI 生成内容可能存在偏差，请务必核验重要信息。
+                    </div>
+</div>
+</div>
+</section>
+</main>
+</body></html>

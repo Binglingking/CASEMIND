@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CaseMind - 记忆构建</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary": "#cdc0e9",
+                      "inverse-surface": "#e6e0e9",
+                      "primary-container": "#6750a4",
+                      "secondary-container": "#4d4465",
+                      "outline-variant": "#494551",
+                      "surface-container-high": "#2b292f",
+                      "primary-fixed": "#e9ddff",
+                      "primary": "#cfbcff",
+                      "error-container": "#93000a",
+                      "outline": "#948e9c",
+                      "surface-container": "#211f24",
+                      "on-background": "#e6e0e9",
+                      "on-secondary-fixed": "#1f1635",
+                      "tertiary-fixed": "#ffdf93",
+                      "tertiary-container": "#c9a74d",
+                      "on-tertiary": "#3e2e00",
+                      "error": "#ffb4ab",
+                      "on-secondary-fixed-variant": "#4b4263",
+                      "on-tertiary-fixed-variant": "#594400",
+                      "inverse-on-surface": "#322f35",
+                      "background": "#141218",
+                      "surface-tint": "#cfbcff",
+                      "on-primary-fixed": "#22005d",
+                      "primary-fixed-dim": "#cfbcff",
+                      "surface-bright": "#3b383e",
+                      "on-error": "#690005",
+                      "on-secondary-container": "#bfb2da",
+                      "on-tertiary-fixed": "#241a00",
+                      "on-surface": "#e6e0e9",
+                      "surface-dim": "#141218",
+                      "tertiary": "#e7c365",
+                      "on-primary-container": "#e0d2ff",
+                      "surface-container-lowest": "#0f0d13",
+                      "on-error-container": "#ffdad6",
+                      "inverse-primary": "#6750a4",
+                      "surface": "#141218",
+                      "on-secondary": "#342b4b",
+                      "secondary-fixed-dim": "#cdc0e9",
+                      "on-tertiary-container": "#503d00",
+                      "surface-container-low": "#1d1b20",
+                      "secondary-fixed": "#e9ddff",
+                      "on-surface-variant": "#cbc4d2",
+                      "tertiary-fixed-dim": "#e7c365",
+                      "on-primary-fixed-variant": "#4f378a",
+                      "surface-variant": "#36343a",
+                      "on-primary": "#381e72",
+                      "surface-container-highest": "#36343a"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "gutter": "24px",
+                      "margin": "32px",
+                      "lg": "24px",
+                      "xs": "4px",
+                      "unit": "4px",
+                      "sm": "8px",
+                      "md": "16px",
+                      "xl": "40px"
+              },
+              "fontFamily": {
+                      "display": ["Manrope"],
+                      "h1": ["Manrope"],
+                      "body-md": ["Manrope"],
+                      "body-lg": ["Manrope"],
+                      "label-caps": ["Space Grotesk"],
+                      "h2": ["Manrope"]
+              },
+              "fontSize": {
+                      "display": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "h1": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400"}],
+                      "body-lg": ["18px", {"lineHeight": "1.6", "letterSpacing": "0.01em", "fontWeight": "400"}],
+                      "label-caps": ["12px", {"lineHeight": "1.5", "letterSpacing": "0.1em", "fontWeight": "500"}],
+                      "h2": ["24px", {"lineHeight": "1.3", "letterSpacing": "0em", "fontWeight": "600"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Custom scrollbar for editors/logs */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(20, 18, 24, 0.5); 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(73, 69, 81, 0.5); 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(73, 69, 81, 0.8); 
+        }
+        
+        .code-font {
+            font-family: 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', "Liberation Mono", "Courier New", monospace;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex selection:bg-primary/30 selection:text-primary">
+<!-- Shared Component: SideNavBar -->
+<nav class="fixed left-0 top-0 h-full flex flex-col p-4 z-40 bg-surface-container-low/80 backdrop-blur-xl font-manrope font-medium text-sm h-[calc(100vh-2rem)] w-64 m-4 rounded-3xl border border-white/10 divide-y divide-white/5 shadow-2xl shadow-black/20 transition-all duration-300 ease-out hidden md:flex">
+<!-- Header -->
+<div class="px-4 py-6 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center border border-primary/30 shadow-[0_0_15px_rgba(103,80,164,0.3)]">
+<span class="material-symbols-outlined text-primary-fixed text-2xl">hive</span>
+</div>
+<div>
+<h1 class="text-indigo-400 font-black uppercase tracking-widest text-lg">CaseMind</h1>
+<p class="text-on-surface-variant text-xs">AI 引擎已激活</p>
+</div>
+</div>
+<!-- Main Navigation -->
+<div class="flex-1 py-4 flex flex-col gap-1">
+<a class="flex items-center gap-3 text-slate-500 hover:text-slate-200 px-4 py-3 rounded-lg hover:bg-white/5 hover:shadow-[inner_0_0_10px_rgba(255,255,255,0.05)] transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-lg">folder</span>
+                项目
+            </a>
+<!-- Active Tab: Models (maps to AI Memory building) -->
+<a class="flex items-center gap-3 bg-indigo-500/10 text-indigo-300 border-r-2 border-indigo-400 shadow-[0_0_15px_rgba(103,80,164,0.2)] rounded-lg transition-all duration-300 px-4 py-3" href="#">
+<span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">psychology</span>
+                模型
+            </a>
+<a class="flex items-center gap-3 text-slate-500 hover:text-slate-200 px-4 py-3 rounded-lg hover:bg-white/5 hover:shadow-[inner_0_0_10px_rgba(255,255,255,0.05)] transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-lg">edit_note</span>
+                草稿
+            </a>
+<a class="flex items-center gap-3 text-slate-500 hover:text-slate-200 px-4 py-3 rounded-lg hover:bg-white/5 hover:shadow-[inner_0_0_10px_rgba(255,255,255,0.05)] transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-lg">history</span>
+                历史
+            </a>
+</div>
+<!-- Footer Navigation -->
+<div class="py-4 flex flex-col gap-1">
+<a class="flex items-center gap-3 text-slate-500 hover:text-slate-200 px-4 py-3 rounded-lg hover:bg-white/5 hover:shadow-[inner_0_0_10px_rgba(255,255,255,0.05)] transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-lg">contact_support</span>
+                支持
+            </a>
+<a class="flex items-center gap-3 text-slate-500 hover:text-slate-200 px-4 py-3 rounded-lg hover:bg-white/5 hover:shadow-[inner_0_0_10px_rgba(255,255,255,0.05)] transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-lg">settings</span>
+                设置
+            </a>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 ml-0 md:ml-72 min-h-screen p-margin flex flex-col gap-gutter">
+<!-- Header Section -->
+<header class="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-md border-b border-white/5">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<span class="font-label-caps text-label-caps text-primary tracking-widest px-2 py-1 rounded bg-primary/10 border border-primary/20 shadow-[0_0_10px_rgba(207,188,255,0.1)]">系统核心</span>
+<div class="flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container-high border border-outline-variant/50">
+<div class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]"></div>
+<span class="font-label-caps text-[10px] text-emerald-400 tracking-wider">已完成</span>
+</div>
+</div>
+<h1 class="font-h1 text-h1 text-on-surface bg-clip-text text-transparent bg-gradient-to-r from-white to-on-surface-variant">记忆构建 <span class="text-on-surface-variant font-light"></span></h1>
+</div>
+<!-- Controls Panel (Glassmorphism) -->
+<div class="flex items-center gap-4 bg-surface-container-low/60 backdrop-blur-2xl p-2 rounded-2xl border border-white/5 shadow-xl shadow-black/50">
+<label class="flex items-center gap-3 px-4 py-2 cursor-pointer group">
+<div class="relative">
+<input checked="" class="sr-only" type="checkbox"/>
+<div class="block w-10 h-6 bg-primary-container rounded-full border border-primary/30 transition-colors"></div>
+<div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform translate-x-4 shadow-[0_0_5px_rgba(255,255,255,0.5)]"></div>
+</div>
+<span class="font-body-md text-sm text-on-surface-variant group-hover:text-on-surface transition-colors">增量构建</span>
+</label>
+<div class="w-px h-8 bg-white/10"></div>
+<label class="flex items-center gap-2 px-4 py-2 cursor-pointer group">
+<input class="form-checkbox bg-surface border-outline-variant rounded text-error focus:ring-error focus:ring-offset-0 focus:ring-offset-transparent w-4 h-4 transition-all" type="checkbox"/>
+<span class="font-body-md text-sm text-on-surface-variant group-hover:text-on-surface transition-colors">强制完全重构</span>
+</label>
+<button class="ml-2 relative overflow-hidden group bg-gradient-to-r from-[#cfbcff] to-[#cdc0e9] text-on-primary-fixed font-h2 text-sm px-6 py-2.5 rounded-xl hover:scale-[1.02] transition-all duration-300 shadow-[0_0_20px_rgba(207,188,255,0.2)] hover:shadow-[0_0_30px_rgba(207,188,255,0.4)]">
+<div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out"></div>
+<span class="relative flex items-center gap-2 font-semibold">
+<span class="material-symbols-outlined text-sm">memory</span>
+                        构建 AI 记忆
+                    </span>
+</button>
+</div>
+</header>
+<!-- Main Layout Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter flex-1 min-h-[600px]">
+<!-- Left Column: Logs & Stats -->
+<div class="lg:col-span-4 flex flex-col gap-4">
+<!-- Stats Row -->
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-surface-container p-4 rounded-xl border border-white/5 flex flex-col gap-1 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3 opacity-10 text-emerald-400"><span class="material-symbols-outlined text-4xl">add_circle</span></div>
+<span class="font-label-caps text-label-caps text-on-surface-variant">新增</span>
+<span class="font-display text-2xl text-emerald-400">142</span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-white/5 flex flex-col gap-1 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3 opacity-10 text-tertiary"><span class="material-symbols-outlined text-4xl">edit</span></div>
+<span class="font-label-caps text-label-caps text-on-surface-variant">修改</span>
+<span class="font-display text-2xl text-tertiary">38</span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-white/5 flex flex-col gap-1 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3 opacity-10 text-outline"><span class="material-symbols-outlined text-4xl">next_plan</span></div>
+<span class="font-label-caps text-label-caps text-on-surface-variant">跳过</span>
+<span class="font-display text-2xl text-outline-variant">891</span>
+</div>
+<div class="bg-surface-container p-4 rounded-xl border border-white/5 flex flex-col gap-1 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3 opacity-10 text-error"><span class="material-symbols-outlined text-4xl">delete</span></div>
+<span class="font-label-caps text-label-caps text-on-surface-variant">删除</span>
+<span class="font-display text-2xl text-error">12</span>
+</div>
+</div>
+<!-- Live Logs Terminal -->
+<div class="flex-1 bg-[#0a0a0c] rounded-2xl border border-outline-variant/30 flex flex-col overflow-hidden relative shadow-inner">
+<div class="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent"></div>
+<div class="px-4 py-3 bg-surface-container-highest/50 border-b border-white/5 flex items-center justify-between">
+<span class="font-label-caps text-xs text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">terminal</span>
+                            构建日志
+                        </span>
+<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+</div>
+<div class="p-4 flex-1 overflow-y-auto code-font text-xs leading-relaxed space-y-1">
+<div class="text-outline">[14:02:31] Initializing memory matrix...</div>
+<div class="text-outline">[14:02:32] Loading semantic vectors from datastore_v4...</div>
+<div class="text-tertiary">[14:02:34] MODIFIED: Node user_preferences.json - Updated weighting.</div>
+<div class="text-outline-variant">[14:02:35] SKIPPED: Entity 0x8F2A (No changes detected)</div>
+<div class="text-outline-variant">[14:02:35] SKIPPED: Entity 0x8F2B (No changes detected)</div>
+<div class="text-emerald-400">[14:02:36] ADDED: New relation graph 'Project_CaseMind' -&gt; 'UI_Guidelines'</div>
+<div class="text-emerald-400">[14:02:36] ADDED: Concept 'Glassmorphism' injected to semantic net.</div>
+<div class="text-error">[14:02:38] DELETED: Obsolete temporal anchor temp_id_992.</div>
+<div class="text-outline">[14:02:40] Synthesizing narrative structures...</div>
+<div class="text-outline">[14:02:45] Compiling system prompts...</div>
+<div class="text-primary mt-2">&gt; Build complete. Memory synchronized.</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Split Editors -->
+<div class="lg:col-span-8 flex flex-col lg:flex-row gap-4">
+<!-- Editor 1: memory.md -->
+<div class="flex-1 bg-surface-container rounded-2xl border border-white/5 flex flex-col overflow-hidden shadow-2xl shadow-black/50">
+<div class="px-4 py-3 bg-surface-container-high flex items-center justify-between border-b border-outline-variant/30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-sm">markdown</span>
+<span class="font-body-md text-sm text-on-surface">memory.md</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant ml-2 bg-surface px-2 py-0.5 rounded">综合理解</span>
+</div>
+</div>
+<div class="p-6 flex-1 overflow-y-auto bg-[#0f0d13]">
+<div class="code-font text-sm text-on-surface-variant leading-loose whitespace-pre-wrap"># CaseMind 项目 - 核心理解
+
+## 审美原则
+系统必须遵循"优雅科技"的风格，具体定义为：
+- **玻璃拟物化 (Glassmorphism)**：最小化纯色背景，依赖 `backdrop-blur` 和半透明图层。
+- **流体网格 (Fluid Grids)**：12列布局，宽松的外部边距（40px+）和紧凑的内部间距（8px）。
+- **Z轴层次**：通过色调变化而非沉重的阴影来实现深度。
+
+## 用户语境
+目标受众包括高级 AI 从业者和设计师，需要高数据密度且不会产生认知超载。
+
+## 结构说明
+- 导航元素高度依赖上下文。
+- 表单和输入框需要发光的焦点状态。
+- 所有操作应感觉轻盈但有响应（悬停时 2% 的缩放变化）。</div>
+</div>
+</div>
+<!-- Editor 2: memory_prompt.txt -->
+<div class="flex-1 bg-surface-container rounded-2xl border border-white/5 flex flex-col overflow-hidden shadow-2xl shadow-black/50">
+<div class="px-4 py-3 bg-surface-container-high flex items-center justify-between border-b border-outline-variant/30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-sm">description</span>
+<span class="font-body-md text-sm text-on-surface">memory_prompt.txt</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant ml-2 bg-surface px-2 py-0.5 rounded">系统提示词</span>
+</div>
+</div>
+<div class="p-6 flex-1 overflow-y-auto bg-[#0f0d13] relative">
+<!-- Line numbers mock -->
+<div class="absolute left-0 top-0 bottom-0 w-10 bg-surface-container-lowest border-r border-outline-variant/20 flex flex-col text-right pr-2 py-6 code-font text-xs text-outline-variant select-none">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span>
+</div>
+<div class="pl-8 code-font text-sm text-[#cbc4d2] leading-loose whitespace-pre-wrap"><span class="text-primary">系统指令：</span>
+您是 CaseMind 的中央智能体。您的主要指令是处理并综合设计系统为可操作的 UI 组件。
+
+<span class="text-tertiary">上下文约束：</span>
+- 始终默认使用深色模式样式。
+- 优先使用字体粗细而不是仅用大小来划分视觉层级。
+- 确保所有生成的代码严格遵守提供的 Tailwind JSON 配置。
+
+<span class="text-error">禁止事项：</span>
+- 不要随意发明十六进制颜色。
+- 不要偏离语义化结构要求。</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>
