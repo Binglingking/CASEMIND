@@ -340,6 +340,139 @@ def batch_review_inferred(
     return results
 
 
+def promote_accepted_inferred(project: str) -> dict:
+    """将 accepted / auto_accepted 的 InferredKnowledgePoint 提升为正式 KnowledgePoint。
+
+    读取 inferred_kps.json 中 review_status 为 'accepted' 或 'auto_accepted' 且
+    promoted_kp_id 为空的条目，转换为 KnowledgePoint 并写入 knowledge_points.json。
+
+    此函数设计为幂等：已提升的条目（promoted_kp_id 非空）会被跳过。
+
+    Returns
+    -------
+    dict  {"promoted_count": int, "kp_ids": list[str], "skipped_already_promoted": int}
+    """
+    from backend.core import kp_store
+    from backend.schemas.knowledge_point import KnowledgePoint, KPSource
+
+    inferred = legacy_store.load_inferred_kps(project)
+    accepted = [i for i in inferred
+                if i.review_status in ("accepted", "auto_accepted") and not i.promoted_kp_id]
+
+    if not accepted:
+        return {
+            "promoted_count": 0,
+            "kp_ids": [],
+            "skipped_already_promoted": len(
+                [i for i in inferred
+                 if i.review_status in ("accepted", "auto_accepted") and i.promoted_kp_id]
+            ),
+        }
+
+    now = utc_iso_z()
+    new_kps: list[KnowledgePoint] = []
+
+    for ikp in accepted:
+        kp_id = kp_store.next_kp_id(project, ikp.module, ikp.type)
+
+        # 构造溯源信息：优先使用聚合源列表
+        source_label = ikp.source.file or f"legacy:{ikp.source.file_id}"
+        source_detail_parts = [f"legacy_inferred:{ikp.inferred_id}"]
+        if ikp.aggregated_from:
+            source_detail_parts.append(f"aggregated_from:{len(ikp.aggregated_from)}sources")
+        if ikp.source.case_id:
+            source_detail_parts.append(f"case:{ikp.source.case_id}")
+        if ikp.source.case_row is not None:
+            source_detail_parts.append(f"row:{ikp.source.case_row}")
+        if ikp.source.node_path:
+            source_detail_parts.append(f"path:{'/'.join(ikp.source.node_path)}")
+        chunk_id = "|".join(source_detail_parts)
+
+        # section 字段放入 AI 总结依据（如果存在）
+        section_info = f"来源: {ikp.source.kind} / 置信度: {ikp.confidence}"
+        if ikp.source_summary:
+            section_info += f" / 总结: {ikp.source_summary[:120]}"
+
+        new_kps.append(KnowledgePoint(
+            kp_id=kp_id,
+            type=ikp.type,
+            content=ikp.content,
+            module=ikp.module,
+            aliases=ikp.aliases,
+            source=KPSource(
+                file=source_label,
+                chunk_id=chunk_id,
+                section=section_info,
+            ),
+            doc_version=ikp.extracted_at[:10],
+            confidence=ikp.confidence,
+            extracted_at=now,
+            edited_by_user=False,
+            orphan=False,
+        ))
+        ikp.promoted_kp_id = kp_id
+
+    # 写入 knowledge_points.json
+    existing = kp_store.load_all(project)
+    kp_store.save_all(project, existing + new_kps)
+
+    # 回写 inferred_kps.json（更新 promoted_kp_id，保证下次幂等跳过）
+    legacy_store.save_inferred_kps(project, inferred)
+
+    logger.info(
+        "[legacy] promote_accepted_inferred project=%s promoted=%d",
+        project, len(new_kps),
+    )
+
+    return {
+        "promoted_count": len(new_kps),
+        "kp_ids": [kp.kp_id for kp in new_kps],
+        "skipped_already_promoted": len(
+            [i for i in inferred
+             if i.review_status in ("accepted", "auto_accepted") and i.promoted_kp_id]
+        ),
+    }
+
+
+def revoke_auto_accepted(project: str, inferred_id: str) -> dict | None:
+    """撤销 AI 自动通过的候选，将其重置为 pending 状态供人工重新审核。
+
+    仅对 review_status='auto_accepted' 的条目有效；已人工 accept 的不受影响。
+    """
+    items = legacy_store.load_inferred_kps(project)
+    target = next((i for i in items if i.inferred_id == inferred_id), None)
+    if target is None:
+        return None
+    if target.review_status != "auto_accepted":
+        raise ValueError(
+            f"只能撤销 auto_accepted 状态，当前为 {target.review_status}"
+        )
+    target.review_status = "pending"
+    target.auto_accepted = False
+    target.reviewed_by = None
+    target.reviewed_at = None
+    legacy_store.save_inferred_kps(project, items)
+    logger.info("[legacy] revoke_auto_accepted %s → pending", inferred_id)
+    return target.model_dump()
+
+
+def update_inferred_content(
+    project: str, inferred_id: str, content: str,
+    editor: str = "",
+) -> dict | None:
+    """用户二次编辑反哺候选的内容（适用于 auto_accepted 和 accepted）。"""
+    items = legacy_store.load_inferred_kps(project)
+    target = next((i for i in items if i.inferred_id == inferred_id), None)
+    if target is None:
+        return None
+    target.content = content[:300]
+    target.reviewed_by = editor or target.reviewed_by
+    target.reviewed_at = utc_iso_z()
+    legacy_store.save_inferred_kps(project, items)
+    logger.info("[legacy] update_inferred_content %s", inferred_id)
+    return target.model_dump()
+
+
 # ============ Mention 解析（取代 reference_service） ============
 
 def _truncate(text: str, max_chars: int = 40000) -> tuple[str, bool]:

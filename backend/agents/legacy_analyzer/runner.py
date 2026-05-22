@@ -138,18 +138,48 @@ def run(
             message=f"Stage 4 完成 ({stage4_elapsed:.1f}s)"
         )
 
-        # Stage 5: Inferred KPs
-        controller.update_progress(stage=5, stage_name="生成反哺候选", message="正在生成知识点候选...")
-        logger.info("[Stage 5] 生成反哺候选...")
+        # Stage 4.5: AI 智能归纳 + Stage 5: 生成反哺候选
+        # 使用 AI 归纳模式（summarize_signals）来合并去重、生成高价值知识点；
+        # 仅在 skip_extract=True 时回退到原始 1:1 转换模式。
+        controller.update_progress(stage=5, stage_name="AI 归纳与反哺候选",
+                                   message="正在调用 LLM 进行全局归纳...")
+        logger.info("[Stage 4.5] AI 归纳反哺候选...")
         stage5_start = time.time()
-        inferred = stage5_inferred.to_inferred_kps(aggregated, batch)
+        summarize_errors: list[str] = []
+        if not skip_extract and aggregated.items:
+            # AI 归纳模式
+            inferred, summarize_calls, summarize_errors = stage5_inferred.summarize_signals(
+                aggregated, batch, cfg=cfg,
+            )
+            llm_calls += summarize_calls
+            errors.extend(summarize_errors)
+            logger.info(
+                "[Stage 4.5] AI 归纳完成，LLM 调用 %d 次，"
+                "%d 条信号 → %d 条知识点",
+                summarize_calls, len(aggregated.items), len(inferred),
+            )
+        else:
+            # 原始模式（1:1 转换，不调 LLM）
+            inferred = stage5_inferred.to_inferred_kps(aggregated, batch)
+            logger.info(
+                "[Stage 5] 原始模式: %d 条信号 → %d 条知识点",
+                len(aggregated.items), len(inferred),
+            )
+
         if inferred:
             stage5_inferred.persist(project, inferred)
         stage5_elapsed = time.time() - stage5_start
-        logger.info(f"[Stage 5] 完成，耗时 {stage5_elapsed:.1f}s，生成 {len(inferred)} 个反哺候选")
+
+        # 统计 auto_accepted 数量
+        auto_count = sum(1 for ikp in inferred if ikp.review_status == "auto_accepted")
+        pending_count = sum(1 for ikp in inferred if ikp.review_status == "pending")
+        logger.info(
+            f"[Stage 5] 完成，耗时 {stage5_elapsed:.1f}s，生成 {len(inferred)} 个反哺候选 "
+            f"(auto_accepted={auto_count}, pending={pending_count})"
+        )
         controller.update_progress(
             completed_batches=5,
-            message=f"Stage 5 完成 ({stage5_elapsed:.1f}s)"
+            message=f"Stage 5 完成 ({stage5_elapsed:.1f}s, 自动通过 {auto_count}, 待审 {pending_count})"
         )
 
         # Save style profile

@@ -264,6 +264,17 @@ class MemoryAgent(AgentBase):
                 # 抽取失败不得影响 memory.md 产出
                 log.append(f"knowledge_extraction failed (ignored): {e!r}")
 
+            # --- 7) 反哺候选提升：将 accepted 的 IKP 转为正式 KP ---
+            promoted_inferred: dict | None = None
+            try:
+                from backend.services.legacy_service import promote_accepted_inferred
+                controller.update_progress(step=8, step_name="反哺知识提升",
+                                           message="正在将审核通过的反哺候选转为正式知识点...")
+                promoted_inferred = promote_accepted_inferred(self.project)
+                log.append(f"promoted_inferred: {promoted_inferred}")
+            except Exception as e:
+                log.append(f"promote_inferred failed (ignored): {e!r}")
+
             controller.complete()
             
             return {
@@ -277,6 +288,7 @@ class MemoryAgent(AgentBase):
                 "memory_prompt_path": str(_memory_prompt_path(self.project)),
                 "vector_stats": store.stats(),
                 "knowledge_points": kp_result,
+                "promoted_inferred": promoted_inferred,
                 "log": log,
             }
             

@@ -74,7 +74,7 @@ test_report*.json
 test_report.html
 debug_*.py
 sync_*.py
-test*.py
+/test*.py
 !backend/tests/
 
 # 环境变量

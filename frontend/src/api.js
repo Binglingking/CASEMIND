@@ -204,6 +204,23 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ project, inferred_ids, decision, reviewer }),
     }),
+  legacyRevokeInferred: (project, inferred_id) =>
+    req('/legacy/inferred/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project, inferred_id, decision: 'revoke' }),
+    }),
+  legacyEditInferred: (project, inferred_id, content, editor = '') => {
+    const form = new FormData();
+    form.append('project', project);
+    form.append('inferred_id', inferred_id);
+    form.append('content', content);
+    form.append('editor', editor);
+    return req('/legacy/inferred/edit', {
+      method: 'POST',
+      body: form,
+    });
+  },
 
   legacyAnalyze: (project, llm, { skip_extract = false } = {}) =>
     req('/legacy/analyze', {

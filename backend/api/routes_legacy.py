@@ -241,6 +241,50 @@ def batch_review_inferred(body: BatchReviewBody):
     return {"ok": True, "items": items, "count": len(items)}
 
 
+@router.post("/inferred/promote")
+def promote_inferred(project: str):
+    """将已审核通过（accepted / auto_accepted）的反哺候选提升为正式知识点。
+
+    幂等操作：已提升的条目不会被重复处理。
+    """
+    try:
+        result = legacy_service.promote_accepted_inferred(project)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    return {"ok": True, **result}
+
+
+@router.post("/inferred/revoke")
+def revoke_auto_accepted(body: ReviewBody):
+    """撤销 AI 自动通过的反哺候选，重置为 pending 状态。"""
+    try:
+        item = legacy_service.revoke_auto_accepted(body.project, body.inferred_id)
+        if item is None:
+            raise HTTPException(404, f"inferred_id 不存在: {body.inferred_id}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "item": item}
+
+
+@router.post("/inferred/edit")
+def edit_inferred_content(
+    project: str = Form(...),
+    inferred_id: str = Form(...),
+    content: str = Form(...),
+    editor: str = Form(""),
+):
+    """用户二次编辑反哺候选的内容。"""
+    try:
+        item = legacy_service.update_inferred_content(
+            project, inferred_id, content, editor=editor,
+        )
+        if item is None:
+            raise HTTPException(404, f"inferred_id 不存在: {inferred_id}")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    return {"ok": True, "item": item}
+
+
 # ---------- 五阶段分析触发 ----------
 
 @router.post("/analyze")
