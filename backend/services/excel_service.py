@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl import Workbook
 
 from backend.services import output_service
+from backend.services.md_case_utils import format_numbered_multiline
 
 
 COLUMNS = [
@@ -272,14 +273,12 @@ def write_with_team_template(cases: list[dict], *, default_creator: str = "") ->
             steps_text = str(steps_arr)
 
         # 前置
-        pre = c.get("preconditions", "") or c.get("preconditions_text", "")
-        if isinstance(pre, list):
-            pre = "\n".join(str(p) for p in pre)
+        pre_raw = c.get("preconditions", "") or c.get("preconditions_text", "")
+        pre = format_numbered_multiline(pre_raw)
 
         # 预期：列表/单值/逐步合并
-        expected = c.get("expected_result") or c.get("expected") or ""
-        if isinstance(expected, list):
-            expected = "\n".join(str(p) for p in expected)
+        expected_raw = c.get("expected_result") or c.get("expected") or ""
+        expected = format_numbered_multiline(expected_raw)
         # 兜底：从 steps[*].expected 合并（LegacyCase 形态）
         if not expected and isinstance(steps_arr, list):
             expects = []
@@ -348,13 +347,11 @@ def _excel_from_cases(cases: list[dict]) -> bytes:
         else:
             steps_text = str(steps_arr)
 
-        # 处理preconditions：支持列表和字符串
-        preconditions = c.get("preconditions", "")
-        if isinstance(preconditions, list):
-            preconditions = "\n".join(str(p) for p in preconditions)
+        # 处理preconditions：支持列表和字符串，标号分行
+        preconditions = format_numbered_multiline(c.get("preconditions", ""))
 
-        # 处理expected：兼容不同字段名
-        expected = c.get("expected") or c.get("expected_result", "")
+        # 处理expected：兼容不同字段名，标号分行
+        expected = format_numbered_multiline(c.get("expected") or c.get("expected_result", ""))
 
         # 处理source_refs：支持多种格式（字符串数组或字典数组）
         source_refs = c.get("source_refs") or []

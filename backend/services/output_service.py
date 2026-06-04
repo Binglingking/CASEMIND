@@ -6,17 +6,18 @@ No JSON index — the filesystem is the source of truth.
 from __future__ import annotations
 
 import json
+import mimetypes
 from pathlib import Path
 
 from backend.core.project import project_manager
 
 
-SAFE_KINDS = {"testcase", "xmind"}
+SAFE_KINDS = {"testcase", "xmind", "req_analysis"}
 
 
 def _validate_kind(kind: str) -> None:
     if kind not in SAFE_KINDS:
-        raise ValueError(f"kind must be testcase or xmind, got: {kind}")
+        raise ValueError(f"kind must be testcase, xmind, or req_analysis, got: {kind}")
 
 
 def _validate_filename(filename: str) -> str:
@@ -30,7 +31,9 @@ def _dir_for(project: str, kind: str) -> Path:
     _validate_kind(kind)
     if kind == "testcase":
         return project_manager.out_testcase_dir(project)
-    return project_manager.out_xmind_dir(project)
+    if kind == "xmind":
+        return project_manager.out_xmind_dir(project)
+    return project_manager.out_req_analysis_dir(project)
 
 
 def list_outputs(project: str, kind: str | None = None) -> list[dict]:
@@ -45,6 +48,8 @@ def list_outputs(project: str, kind: str | None = None) -> list[dict]:
             continue
         for p in d.iterdir():
             if not p.is_file():
+                continue
+            if k == "req_analysis" and p.suffix.lower() != ".pdf":
                 continue
             try:
                 st = p.stat()
@@ -70,6 +75,16 @@ def read_output_content(project: str, kind: str, filename: str) -> dict:
         raise ValueError(f"文件不存在: {filename}")
 
     st = target.stat()
+    if kind == "req_analysis":
+        return {
+            "name": fname,
+            "kind": kind,
+            "size": int(st.st_size),
+            "mtime": float(st.st_mtime),
+            "content_type": mimetypes.guess_type(fname)[0] or "application/pdf",
+            "truncated": False,
+        }
+
     raw = target.read_text(encoding="utf-8")
     truncated = False
 
@@ -125,6 +140,15 @@ def read_output_raw(project: str, kind: str, filename: str) -> str:
     if not target.exists() or not target.is_file():
         raise ValueError(f"文件不存在: {filename}")
     return target.read_text(encoding="utf-8")
+
+
+def output_path(project: str, kind: str, filename: str) -> Path:
+    _validate_kind(kind)
+    fname = _validate_filename(filename)
+    target = _dir_for(project, kind) / fname
+    if not target.exists() or not target.is_file():
+        raise ValueError(f"File does not exist: {filename}")
+    return target
 
 
 def rename_output(project: str, kind: str, old_name: str, new_name: str) -> dict:

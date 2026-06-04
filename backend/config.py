@@ -23,6 +23,8 @@ class Features(BaseModel):
     enable_legacy_style_reference: bool = False        # 历史用例作为 few-shot 注入 Generator
     enable_legacy_inference: bool = False              # 启用反哺候选审核（写入 inferred_kps）
     enable_legacy_inference_auto_accept: bool = False  # 五阶段产出的高置信反哺直接写 KP（高风险，默认关）
+    # ---- P4 / 飞书集成 ----
+    enable_feishu_integration: bool = False            # 飞书集成总开关（项目级细化在 memory/<project>/feishu.json）
 
 
 class ContextBudget(BaseModel):
@@ -51,6 +53,10 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 120
     top_k: int = 12
+
+    # 图片上传配置
+    max_image_size_mb: int = 10
+    allowed_image_types: list[str] = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
     # 新增：实验性功能与上下文预算
     features: Features = Features()

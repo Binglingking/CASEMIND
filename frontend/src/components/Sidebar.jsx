@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import { api } from '../api.js';
 import { useProject } from '../store.js';
 
@@ -14,7 +15,7 @@ const CASEGEN_TAB  = { id: 'casegen',   label: '用例流水线', icon: 'account
 const CONFLICT_TAB = { id: 'conflicts', label: '冲突检测',   icon: 'report_problem' };
 const SETTINGS_TAB = { id: 'settings',  label: '设置',       icon: 'settings' };
 
-export default function Sidebar({ tab, setTab }) {
+export default function Sidebar() {
   const [project] = useProject();
   const [flash, setFlash] = useState(false);
 
@@ -26,7 +27,6 @@ export default function Sidebar({ tab, setTab }) {
     }
   }, [project]);
 
-  // 根据 features flag 动态决定可选 tab 是否展示
   const [pipelineOn, setPipelineOn] = useState(false);
   const [conflictOn, setConflictOn] = useState(false);
   useEffect(() => {
@@ -37,7 +37,7 @@ export default function Sidebar({ tab, setTab }) {
         setPipelineOn(!!f.enable_case_gen_pipeline);
         setConflictOn(!!f.enable_conflict_detection);
       })
-      .catch(() => { /* 后端不可用时保守不显示 */ });
+      .catch(() => {});
     load();
     window.addEventListener('casemind:features', load);
     return () => {
@@ -52,6 +52,7 @@ export default function Sidebar({ tab, setTab }) {
     ...(conflictOn ? [CONFLICT_TAB] : []),
     SETTINGS_TAB,
   ];
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -64,14 +65,14 @@ export default function Sidebar({ tab, setTab }) {
 
       <nav>
         {tabs.map(t => (
-          <button
+          <NavLink
             key={t.id}
-            className={tab === t.id ? 'active' : ''}
-            onClick={() => setTab(t.id)}
+            to={`/${t.id}`}
+            className={({ isActive }) => isActive ? 'active' : ''}
           >
             <span className="mi">{t.icon}</span>
             <span>{t.label}</span>
-          </button>
+          </NavLink>
         ))}
       </nav>
 

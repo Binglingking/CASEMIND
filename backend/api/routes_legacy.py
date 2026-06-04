@@ -243,20 +243,25 @@ def batch_review_inferred(body: BatchReviewBody):
 
 @router.post("/inferred/promote")
 def promote_inferred(project: str):
-    """将已审核通过（accepted / auto_accepted）的反哺候选提升为正式知识点。
+    """将 ready_to_build 队列内的反哺候选提升为正式知识点。
 
-    幂等操作：已提升的条目不会被重复处理。
+    幂等操作：已 promoted 的条目不会被重复处理。
     """
     try:
-        result = legacy_service.promote_accepted_inferred(project)
+        result = legacy_service.promote_ready_to_build(project)
     except Exception as e:
         raise HTTPException(500, str(e))
     return {"ok": True, **result}
 
 
+@router.get("/inferred/stats")
+def inferred_stats(project: str):
+    return {"project": project, **legacy_service.inferred_stats(project)}
+
+
 @router.post("/inferred/revoke")
 def revoke_auto_accepted(body: ReviewBody):
-    """撤销 AI 自动通过的反哺候选，重置为 pending 状态。"""
+    """撤销 AI 自动通过的反哺候选，重置为 pending_review 状态。"""
     try:
         item = legacy_service.revoke_auto_accepted(body.project, body.inferred_id)
         if item is None:

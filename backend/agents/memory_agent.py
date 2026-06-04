@@ -264,13 +264,13 @@ class MemoryAgent(AgentBase):
                 # 抽取失败不得影响 memory.md 产出
                 log.append(f"knowledge_extraction failed (ignored): {e!r}")
 
-            # --- 7) 反哺候选提升：将 accepted 的 IKP 转为正式 KP ---
+            # --- 7) 反哺候选提升：将 ready_to_build 队列内的 IKP 转为正式 KP ---
             promoted_inferred: dict | None = None
             try:
-                from backend.services.legacy_service import promote_accepted_inferred
+                from backend.services.legacy_service import promote_ready_to_build
                 controller.update_progress(step=8, step_name="反哺知识提升",
-                                           message="正在将审核通过的反哺候选转为正式知识点...")
-                promoted_inferred = promote_accepted_inferred(self.project)
+                                           message="正在将 build 队列中的反哺候选转为正式知识点...")
+                promoted_inferred = promote_ready_to_build(self.project)
                 log.append(f"promoted_inferred: {promoted_inferred}")
             except Exception as e:
                 log.append(f"promote_inferred failed (ignored): {e!r}")

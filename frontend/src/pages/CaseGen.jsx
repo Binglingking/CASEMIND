@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { useLLM, useProject } from '../store.js';
+import { useProject } from '../store.js';
+import AiModelSelect, { useScopedLLM } from '../components/AiModelSelect.jsx';
 
 const STEP_LABELS = {
   1: 'Step1 · Slicer（需求切片）',
@@ -28,7 +29,7 @@ function fmtTime(iso) {
 
 export default function CaseGen() {
   const [project] = useProject();
-  const [llm] = useLLM();
+  const [llm, selectedModel, setSelectedModel, defaultModel] = useScopedLLM('case-gen');
   const [list, setList] = useState([]);
   const [selected, setSelected] = useState(null);   // {state, step_outputs}
   const [pid, setPid] = useState('');
@@ -238,10 +239,19 @@ export default function CaseGen() {
                 value={question}
                 onChange={e => setQuestion(e.target.value)}
               />
-              <button className="primary" style={{ marginTop: 8 }} disabled={busy} onClick={startNew}>
-                <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>play_arrow</span>
-                开始新流水线
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <AiModelSelect
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  defaultModel={defaultModel}
+                  disabled={busy}
+                  title="选择用例流水线模型"
+                />
+                <button className="primary" disabled={busy} onClick={startNew}>
+                  <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>play_arrow</span>
+                  开始新流水线
+                </button>
+              </div>
             </div>
 
             <div className="card" style={{ margin: 0 }}>
@@ -307,7 +317,14 @@ export default function CaseGen() {
                         <h3 style={{ margin: 0, fontSize: 15 }}>{STEP_LABELS[n]}</h3>
                         <StatusTag status={ss.status} />
                         {ss.user_edited && <span className="tag warn" style={{ fontSize: 11 }}>用户编辑</span>}
-                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: '100%' }}>
+                          <AiModelSelect
+                            value={selectedModel}
+                            onChange={setSelectedModel}
+                            defaultModel={defaultModel}
+                            disabled={busy}
+                            title={`选择 ${STEP_LABELS[n]} 运行模型`}
+                          />
                           <button className="ghost" disabled={busy} onClick={() => runStep(n)}>
                             <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>play_arrow</span>
                             运行

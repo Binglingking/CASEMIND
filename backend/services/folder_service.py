@@ -6,8 +6,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from backend.config import settings
 from backend.core import folders as folders_store
 from backend.core.file_scanner import scan_folder
+from backend.core.parser import SUPPORTED_EXTS
 
 
 def list_folders_with_stats(project: str) -> list[dict]:
@@ -114,3 +116,57 @@ def open_file(project: str, path: str) -> dict:
     except Exception as e:
         raise RuntimeError(f"打开文件失败：{e}") from e
     return {"ok": True, "path": str(target)}
+
+
+def upload_files(project: str, files: list[tuple[str, bytes]]) -> dict:
+    """Upload requirement doc files to memory/<project>/uploads/ and register as a folder.
+
+    Args:
+        project: project name
+        files: list of (filename, content_bytes)
+
+    Returns:
+        dict with uploaded count, skipped count, folder path
+    """
+    upload_dir = settings.memory_dir / project / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded = []
+    skipped = []
+    for filename, content in files:
+        ext = Path(filename).suffix.lower()
+        if ext not in SUPPORTED_EXTS:
+            skipped.append(filename)
+            continue
+        # Sanitize filename — keep original name, handle duplicates
+        target = upload_dir / filename
+        if target.exists() and target.read_bytes() == content:
+            skipped.append(filename)
+            continue
+        # Deduplicate by adding suffix if different content
+        if target.exists() and target.read_bytes() != content:
+            stem = target.stem
+            suffix = target.suffix
+            i = 2
+            while target.exists():
+                target = upload_dir / f"{stem}_{i}{suffix}"
+                i += 1
+        target.write_bytes(content)
+        uploaded.append(filename)
+
+    # Auto-register the upload dir as a folder
+    registered = folders_store.list_folders(project)
+    upload_dir_str = str(upload_dir.resolve())
+    already_registered = any(
+        str(Path(f).resolve()) == upload_dir_str for f in registered
+    )
+    if not already_registered and uploaded:
+        folders_store.add_folder(project, upload_dir_str)
+
+    return {
+        "uploaded": len(uploaded),
+        "skipped": len(skipped),
+        "uploaded_names": uploaded,
+        "skipped_names": skipped,
+        "folder": upload_dir_str,
+    }

@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { api } from '../api.js';
-import { useLLM, useProject } from '../store.js';
+import { useProject } from '../store.js';
+import InferredReviewPanel from '../components/InferredReviewPanel.jsx';
+import useInferredReview from '../hooks/useInferredReview.js';
+import AiModelSelect, { useScopedLLM } from '../components/AiModelSelect.jsx';
 
 const LS_LAST_BUILD = (project) => `casemind.lastBuild.${project}`;
 const LS_BUILD_BUSY = (project) => `casemind.buildBusy.${project}`;
@@ -57,7 +60,7 @@ function Stat({ label, value, icon, tone }) {
 
 export default function Memory() {
   const [project] = useProject();
-  const [llm] = useLLM();
+  const [llm, selectedModel, setSelectedModel, defaultModel] = useScopedLLM('memory-build');
   const [memory, setMemory] = useState('');
   const [prompt, setPrompt] = useState('');
   const [log, setLog] = useState([]);
@@ -74,15 +77,8 @@ export default function Memory() {
   const [builds, setBuilds] = useState([]);
   const [previewVersion, setPreviewVersion] = useState(null);
   const [previewBuild, setPreviewBuild] = useState(null);
-  const [inferred, setInferred] = useState([]);
-  const [inferredFilter, setInferredFilter] = useState('pending'); // pending | accepted | rejected | all
-  const [inferredErr, setInferredErr] = useState('');
-  const [selectedInferred, setSelectedInferred] = useState(new Set()); // 选中的反哺候选ID
-  const [currentPage, setCurrentPage] = useState(1); // 当前页码
-  const [pageSize, setPageSize] = useState(10); // 每页显示数量
-  const [editingInferredId, setEditingInferredId] = useState(null); // 正在编辑的 IKP ID
-  const [editingContent, setEditingContent] = useState(''); // 编辑中的内容
-  const [expandedSources, setExpandedSources] = useState(new Set()); // 展开的聚合源
+
+  const inferredReview = useInferredReview(project);
   
   // Memory build progress tracking
   const [buildProgress, setBuildProgress] = useState(null);
@@ -116,153 +112,8 @@ export default function Memory() {
     } catch { setBuilds([]); }
   }
 
-  async function refreshInferred() {
-    setInferredErr('');
-    if (!project) { setInferred([]); return; }
-    try {
-      const status = inferredFilter === 'all' ? null : inferredFilter;
-      const r = await api.legacyListInferred(project, status);
-      setInferred(Array.isArray(r) ? r : (r.items || []));
-    } catch (e) {
-      setInferredErr(String(e.message || e));
-      setInferred([]);
-    }
-  }
 
-  useEffect(() => {
-    if (tab === 'inferred') refreshInferred();
-    // eslint-disable-next-line
-  }, [tab, inferredFilter, project]);
 
-  async function reviewInferred(item, decision) {
-    try {
-      await api.legacyReviewInferred(project, item.inferred_id, decision);
-      refreshInferred();
-      // 如果选中了该项，从选中集合中移除
-      if (selectedInferred.has(item.inferred_id)) {
-        const newSelected = new Set(selectedInferred);
-        newSelected.delete(item.inferred_id);
-        setSelectedInferred(newSelected);
-      }
-    } catch (e) {
-      setInferredErr(String(e.message || e));
-    }
-  }
-
-  // 批量审核功能
-  async function batchReviewInferred(decision) {
-    if (selectedInferred.size === 0) {
-      setInferredErr('请先选择要审核的候选项');
-      return;
-    }
-    
-    try {
-      const selectedIds = Array.from(selectedInferred);
-      await api.legacyBatchReviewInferred(project, selectedIds, decision);
-      setSelectedInferred(new Set()); // 清空选择
-      refreshInferred();
-    } catch (e) {
-      setInferredErr(String(e.message || e));
-    }
-  }
-
-  // 撤销 AI 自动通过
-  async function revokeAutoAccepted(item) {
-    try {
-      await api.legacyRevokeInferred(project, item.inferred_id);
-      refreshInferred();
-    } catch (e) {
-      setInferredErr(String(e.message || e));
-    }
-  }
-
-  // 开始编辑内容
-  function startEditInferred(item) {
-    setEditingInferredId(item.inferred_id);
-    setEditingContent(item.content || '');
-  }
-
-  // 取消编辑
-  function cancelEditInferred() {
-    setEditingInferredId(null);
-    setEditingContent('');
-  }
-
-  // 保存编辑
-  async function saveEditInferred(item) {
-    if (!editingContent.trim()) {
-      setInferredErr('内容不能为空');
-      return;
-    }
-    try {
-      await api.legacyEditInferred(project, item.inferred_id, editingContent.trim());
-      setEditingInferredId(null);
-      setEditingContent('');
-      refreshInferred();
-    } catch (e) {
-      setInferredErr(String(e.message || e));
-    }
-  }
-
-  // 切换聚合源展开
-  function toggleSourceExpand(inferredId) {
-    const next = new Set(expandedSources);
-    if (next.has(inferredId)) {
-      next.delete(inferredId);
-    } else {
-      next.add(inferredId);
-    }
-    setExpandedSources(next);
-  }
-
-  // 切换单个选择
-  function toggleSelectInferred(inferredId) {
-    const newSelected = new Set(selectedInferred);
-    if (newSelected.has(inferredId)) {
-      newSelected.delete(inferredId);
-    } else {
-      newSelected.add(inferredId);
-    }
-    setSelectedInferred(newSelected);
-  }
-
-  // 全选/取消全选（当前页）
-  function toggleSelectAll() {
-    const currentPageItems = getCurrentPageItems();
-    if (selectedInferred.size === currentPageItems.length && currentPageItems.length > 0) {
-      // 如果当前页所有项都已选中，则取消全选
-      const newSelected = new Set(selectedInferred);
-      currentPageItems.forEach(item => newSelected.delete(item.inferred_id));
-      setSelectedInferred(newSelected);
-    } else {
-      // 否则全选当前页
-      const newSelected = new Set(selectedInferred);
-      currentPageItems.forEach(item => newSelected.add(item.inferred_id));
-      setSelectedInferred(newSelected);
-    }
-  }
-
-  // 获取当前页的项目
-  function getCurrentPageItems() {
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    return inferred.slice(startIndex, endIndex);
-  }
-
-  // 计算总页数
-  const totalPages = Math.ceil(inferred.length / pageSize);
-
-  // 分页控制
-  function goToPage(page) {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
-  }
-
-  // 当筛选条件改变时重置页码
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [inferredFilter]);
 
   useEffect(() => {
     refreshVersions();
@@ -569,7 +420,7 @@ export default function Memory() {
             <span style={{ fontSize: 13 }}>强制完全重建</span>
           </label>
           <div style={{ flex: 1 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {busy && (
               <span style={{ fontSize: 12, color: '#e7c365', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span className="mi" style={{ fontSize: 14, animation: 'pulse 1.4s infinite' }}>autorenew</span>
@@ -582,6 +433,13 @@ export default function Memory() {
                 {' '}上次: {formatTimeStr(lastBuild.finishedAt)}
               </span>
             )}
+            <AiModelSelect
+              value={selectedModel}
+              onChange={setSelectedModel}
+              defaultModel={defaultModel}
+              disabled={busy || !project || cooldown}
+              title="选择构建 AI 记忆模型"
+            />
             <button
               className="primary"
               onClick={build}
@@ -980,295 +838,7 @@ export default function Memory() {
         </div>
       )}
 
-      {tab === 'inferred' && (
-        <div className="card" style={{ padding: 16 }}>
-          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-            <div>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="mi" style={{ color: '#cfbcff' }}>auto_awesome</span>
-                历史反哺候选
-              </h3>
-              <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                来自历史用例 / XMind 反推的隐性规则。高置信度（≥0.9）自动通过入库，低置信度需人工审核。
-              </div>
-            </div>
-            <div className="row" style={{ gap: 6 }}>
-              {['pending', 'auto_accepted', 'accepted', 'rejected', 'all'].map(s => (
-                <button
-                  key={s}
-                  className={inferredFilter === s ? 'primary' : 'ghost'}
-                  style={{ padding: '4px 10px', fontSize: 12 }}
-                  onClick={() => setInferredFilter(s)}
-                >
-                  {{ pending: '待审', auto_accepted: 'AI自动通过', accepted: '已通过', rejected: '已拒绝', all: '全部' }[s]}
-                </button>
-              ))}
-              <button className="ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={refreshInferred}>
-                <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>refresh</span>
-                刷新
-              </button>
-            </div>
-          </div>
-          {inferredErr && <div className="err" style={{ marginBottom: 8 }}>{inferredErr}</div>}
-          
-          {/* 批量操作按钮 */}
-          {inferred.length > 0 && inferredFilter === 'pending' && (
-            <div className="row" style={{ gap: 8, marginBottom: 12, alignItems: 'center' }}>
-              <button
-                className="ghost"
-                style={{ padding: '4px 12px', fontSize: 12 }}
-                onClick={toggleSelectAll}
-              >
-                <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>
-                  {selectedInferred.size === getCurrentPageItems().length && getCurrentPageItems().length > 0 ? 'check_box' : 'check_box_outline_blank'}
-                </span>
-                {selectedInferred.size === getCurrentPageItems().length && getCurrentPageItems().length > 0 ? '取消全选' : '全选当前页'}
-              </button>
-              
-              {selectedInferred.size > 0 && (
-                <>
-                  <span style={{ fontSize: 12, color: '#948e9c' }}>已选择 {selectedInferred.size} 项</span>
-                  <button
-                    className="primary"
-                    style={{ padding: '4px 12px', fontSize: 12 }}
-                    onClick={() => batchReviewInferred('accept')}
-                  >
-                    <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>check</span>
-                    批量通过
-                  </button>
-                  <button
-                    className="ghost"
-                    style={{ padding: '4px 12px', fontSize: 12, color: '#ffb4ab' }}
-                    onClick={() => batchReviewInferred('reject')}
-                  >
-                    <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>close</span>
-                    批量拒绝
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-          
-          {inferred.length === 0 ? (
-            <div className="muted" style={{ padding: 28, textAlign: 'center' }}>
-              暂无{ { pending: '待审', auto_accepted: 'AI自动通过', accepted: '已通过', rejected: '已拒绝', all: '' }[inferredFilter] }候选。先到「文件夹 / 历史用例」运行五阶段分析。
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {getCurrentPageItems().map(it => (
-                <div key={it.inferred_id} style={{
-                  border: `1px solid ${it.review_status === 'auto_accepted' ? 'rgba(127,217,168,0.35)' : '#2b292f'}`, borderRadius: 8, padding: 12,
-                  background: it.review_status === 'auto_accepted' ? 'rgba(127,217,168,0.06)' : 'rgba(15,13,19,0.3)',
-                }}>
-                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      {it.review_status === 'pending' && (
-                        <input
-                          type="checkbox"
-                          checked={selectedInferred.has(it.inferred_id)}
-                          onChange={() => toggleSelectInferred(it.inferred_id)}
-                          style={{ marginRight: 4 }}
-                        />
-                      )}
-                      <span className="tag info mono">{it.type}</span>
-                      <span className="tag mono">{it.module || '(无模块)'}</span>
-                      <span
-                        className="tag"
-                        style={{
-                          color: it.confidence >= 0.9 ? '#7fd9a8' : it.confidence >= 0.6 ? '#e7c365' : '#ffb4ab',
-                          background: it.auto_accepted ? 'rgba(127,217,168,0.15)' : undefined,
-                        }}
-                      >
-                        conf {(it.confidence ?? 0).toFixed(2)}
-                      </span>
-                      {it.review_status === 'auto_accepted' && <span className="tag" style={{ background: 'rgba(127,217,168,0.18)', color: '#7fd9a8' }}><span className="mi" style={{ fontSize: 12, verticalAlign: -2, marginRight: 2 }}>auto_awesome</span>AI自动通过</span>}
-                      {it.review_status === 'accepted' && <span className="tag ok">已通过</span>}
-                      {it.review_status === 'rejected' && <span className="tag err">已拒绝</span>}
-                      {it.review_status === 'pending' && <span className="tag warn">待审</span>}
-                      {it.aggregated_from?.length > 1 && (
-                        <span className="tag" style={{ background: 'rgba(207,188,255,0.12)', color: '#cfbcff', cursor: 'pointer' }} onClick={() => toggleSourceExpand(it.inferred_id)}>
-                          <span className="mi" style={{ fontSize: 12, verticalAlign: -2, marginRight: 2 }}>{expandedSources.has(it.inferred_id) ? 'unfold_less' : 'unfold_more'}</span>
-                          {it.aggregated_from.length} 源聚合
-                        </span>
-                      )}
-                    </div>
-                    <div className="muted mono" style={{ fontSize: 11 }}>{it.inferred_id}</div>
-                  </div>
-
-                  {/* 编辑模式 */}
-                  {editingInferredId === it.inferred_id ? (
-                    <div style={{ marginBottom: 8 }}>
-                      <textarea
-                        style={{ width: '100%', minHeight: 80, fontSize: 13, fontFamily: 'inherit', background: '#2b292f', color: '#e6e0e9', border: '1px solid #494551', borderRadius: 6, padding: 8 }}
-                        value={editingContent}
-                        onChange={e => setEditingContent(e.target.value)}
-                      />
-                      <div className="row" style={{ gap: 6, marginTop: 6, justifyContent: 'flex-end' }}>
-                        <button className="ghost" style={{ padding: '3px 10px', fontSize: 12 }} onClick={cancelEditInferred}>取消</button>
-                        <button className="primary" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => saveEditInferred(it)}>保存</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 13, color: '#e6e0e9', marginBottom: 6 }}>{it.content}</div>
-                  )}
-
-                  {it.aliases?.length > 0 && (
-                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                      别名：{it.aliases.join(' / ')}
-                    </div>
-                  )}
-                  {it.reasoning && (
-                    <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.6, marginBottom: 6 }}>
-                      <span className="mi" style={{ fontSize: 12, verticalAlign: -2, marginRight: 4 }}>psychology</span>
-                      推理：{it.reasoning}
-                    </div>
-                  )}
-                  {it.source_summary && (
-                    <div style={{ fontSize: 11.5, lineHeight: 1.6, marginBottom: 6, color: '#cfbcff', background: 'rgba(207,188,255,0.06)', padding: '6px 10px', borderRadius: 6 }}>
-                      <span className="mi" style={{ fontSize: 12, verticalAlign: -2, marginRight: 4 }}>summarize</span>
-                      AI 总结依据：{it.source_summary}
-                    </div>
-                  )}
-
-                  {/* 聚合源展开 */}
-                  {expandedSources.has(it.inferred_id) && it.aggregated_from?.length > 0 && (
-                    <div style={{ fontSize: 11, color: '#948e9c', marginBottom: 6, background: 'rgba(207,188,255,0.04)', padding: '6px 10px', borderRadius: 6 }}>
-                      <div style={{ color: '#cfbcff', marginBottom: 4, fontWeight: 500 }}>聚合自以下 {it.aggregated_from.length} 个来源：</div>
-                      {it.aggregated_from.map((src, idx) => (
-                        <div key={idx} className="mono" style={{ marginBottom: 2, paddingLeft: 8 }}>
-                          {src.kind === 'case' ? '📋' : '🧠'} {src.file}
-                          {src.case_id && <> · {src.case_id}{src.case_row ? ` (行${src.case_row})` : ''}</>}
-                          {src.node_path?.length > 0 && <> · {src.node_path.join(' › ')}</>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="muted mono" style={{ fontSize: 11 }}>
-                    源：{it.source?.kind === 'case' ? '用例' : 'XMind'} · {it.source?.file}
-                    {it.source?.case_id && <> · {it.source.case_id} (行 {it.source.case_row})</>}
-                    {it.source?.node_path?.length > 0 && <> · {it.source.node_path.join(' › ')}</>}
-                  </div>
-
-                  {/* 操作按钮行 */}
-                  <div className="row" style={{ gap: 6, marginTop: 10, justifyContent: 'flex-end' }}>
-                    {it.review_status === 'pending' && (
-                      <>
-                        <button
-                          className="ghost"
-                          style={{ padding: '4px 12px', fontSize: 12, color: '#ffb4ab' }}
-                          onClick={() => reviewInferred(it, 'reject')}
-                        >
-                          <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>close</span>
-                          拒绝
-                        </button>
-                        <button
-                          className="primary"
-                          style={{ padding: '4px 12px', fontSize: 12 }}
-                          onClick={() => reviewInferred(it, 'accept')}
-                        >
-                          <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>check</span>
-                          通过
-                        </button>
-                      </>
-                    )}
-                    {it.review_status === 'auto_accepted' && (
-                      <>
-                        <button
-                          className="ghost"
-                          style={{ padding: '4px 12px', fontSize: 12, color: '#e7c365' }}
-                          onClick={() => revokeAutoAccepted(it)}
-                          title="撤销自动通过，恢复为待审核状态"
-                        >
-                          <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>undo</span>
-                          撤销
-                        </button>
-                        <button
-                          className="ghost"
-                          style={{ padding: '4px 12px', fontSize: 12 }}
-                          onClick={() => startEditInferred(it)}
-                        >
-                          <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>edit</span>
-                          修改
-                        </button>
-                      </>
-                    )}
-                    {it.review_status === 'accepted' && editingInferredId !== it.inferred_id && (
-                      <button
-                        className="ghost"
-                        style={{ padding: '4px 12px', fontSize: 12 }}
-                        onClick={() => startEditInferred(it)}
-                      >
-                        <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 2 }}>edit</span>
-                        二次修改
-                      </button>
-                    )}
-                  </div>
-
-                  {it.reviewed_at && (
-                    <div className="muted mono" style={{ fontSize: 10, marginTop: 6 }}>
-                      审核于 {formatTimeStr(it.reviewed_at)}{it.reviewed_by ? ` · ${it.reviewed_by}` : ''}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          
-          {/* 分页控件 */}
-          {inferred.length > 0 && (
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid #2b292f' }}>
-              <div className="muted" style={{ fontSize: 12 }}>
-                显示 {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, inferred.length)} 条，共 {inferred.length} 条
-              </div>
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  style={{
-                    background: '#2b292f',
-                    color: '#e6e0e9',
-                    border: '1px solid #494551',
-                    borderRadius: 4,
-                    padding: '4px 8px',
-                    fontSize: 12
-                  }}
-                >
-                  <option value={5}>5条/页</option>
-                  <option value={10}>10条/页</option>
-                  <option value={20}>20条/页</option>
-                  <option value={50}>50条/页</option>
-                </select>
-                
-                <button
-                  className="ghost"
-                  style={{ padding: '4px 8px', fontSize: 12 }}
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage <= 1}
-                >
-                  <span className="mi" style={{ fontSize: 14, verticalAlign: -2 }}>chevron_left</span>
-                </button>
-                
-                <span style={{ fontSize: 12, minWidth: 60, textAlign: 'center' }}>
-                  {currentPage} / {totalPages || 1}
-                </span>
-                
-                <button
-                  className="ghost"
-                  style={{ padding: '4px 8px', fontSize: 12 }}
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage >= totalPages}
-                >
-                  <span className="mi" style={{ fontSize: 14, verticalAlign: -2 }}>chevron_right</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {tab === 'inferred' && <InferredReviewPanel {...inferredReview} />}
     </div>
   );
 }

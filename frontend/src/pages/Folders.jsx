@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { useProject, useLLM } from '../store.js';
+import { useProject } from '../store.js';
 import LegacyExcelMappingDialog from '../components/LegacyExcelMappingDialog.jsx';
 import LegacyCaseTable from '../components/LegacyCaseTable.jsx';
 import LegacyXMindTreeView from '../components/LegacyXMindTreeView.jsx';
+import AnalysisProgressPanel from '../components/AnalysisProgressPanel.jsx';
+import useAnalysisProgress from '../hooks/useAnalysisProgress.js';
+import AiModelSelect, { useScopedLLM } from '../components/AiModelSelect.jsx';
 
 function formatSize(bytes) {
   const n = Number(bytes);
@@ -192,7 +195,9 @@ function RequirementsTab({ project }) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [scan, setScan] = useState(null);
+  const [drag, setDrag] = useState(false);
   const streamTimer = useRef(null);
+  const fileInputRef = useRef(null);
 
   async function refresh() {
     setErr('');
@@ -287,6 +292,22 @@ function RequirementsTab({ project }) {
     } catch (e) { setErr(String(e.message || e)); }
   }
 
+  async function upload(filesArr) {
+    if (!project) { setErr('请先选择项目'); return; }
+    if (!filesArr || filesArr.length === 0) return;
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api.uploadFiles(project, filesArr);
+      const parts = [];
+      if (r.uploaded > 0) parts.push(`已上传 ${r.uploaded} 个文件`);
+      if (r.skipped > 0) parts.push(`跳过 ${r.skipped} 个（不支持的格式或重复）`);
+      setMsg(parts.join(' · ') || '无文件被处理');
+      setTimeout(() => setMsg(''), 3000);
+      await refresh();
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusy(false);
+  }
+
   const totalFiles = folders.reduce((a, f) => a + (Number(f.file_count) || 0), 0);
   const totalSize = folders.reduce((a, f) => a + (Number(f.total_size) || 0), 0);
 
@@ -312,6 +333,29 @@ function RequirementsTab({ project }) {
           <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>add</span>
           添加并扫描
         </button>
+      </div>
+
+      <div
+        className={`dropzone ${drag ? 'drag' : ''}`}
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={e => { e.preventDefault(); setDrag(false); upload(Array.from(e.dataTransfer.files || [])); }}
+        onClick={() => fileInputRef.current?.click()}
+        style={{ margin: '12px 0' }}
+      >
+        <span className="mi" style={{ fontSize: 28, color: '#7fd9a8' }}>upload_file</span>
+        <div style={{ marginTop: 8, color: drag ? '#7fd9a8' : '#d8d3de', fontSize: 14 }}>
+          拖拽<b>需求文档</b>到此处，或点击上传
+        </div>
+        <div className="muted" style={{ marginTop: 6 }}>
+          支持 .md / .docx / .pdf / .txt / .markdown · 文件将保存到项目 uploads 目录并自动注册
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file" multiple accept=".md,.markdown,.docx,.pdf,.txt"
+          style={{ display: 'none' }}
+          onChange={e => { upload(Array.from(e.target.files || [])); e.target.value = ''; }}
+        />
       </div>
       {msg && <p className="ok">{msg}</p>}
       {err && <p className="err">{err}</p>}
@@ -379,24 +423,28 @@ function RequirementsTab({ project }) {
   );
 }
 
-function LegacyCaseTab({ project, llm }) {
+function LegacyCaseTab({ project, llm, selectedModel, setSelectedModel, defaultModel }) {
   const [files, setFiles] = useState([]);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
-  const [selectedFileId, setSelectedFileId] = useState(''); // 选中的文件ID（用于弹窗）
+  const [selectedFileId, setSelectedFileId] = useState('');
   const [casesByFid, setCasesByFid] = useState({});
-  const [pendingFile, setPendingFile] = useState(null);     // { headers, suggested, fingerprint, file }
-  const [mappingStore, setMappingStore] = useState(null);   // ProjectColumnMappingStore
+  const [pendingFile, setPendingFile] = useState(null);
+  const [mappingStore, setMappingStore] = useState(null);
   const [mappingMgmtOpen, setMappingMgmtOpen] = useState(false);
-  const [editingMapping, setEditingMapping] = useState(null); // { fingerprint, headers, suggested }
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(null);
-  const [skipExtract, setSkipExtract] = useState(false); // 是否跳过LLM分析
-  const [incremental, setIncremental] = useState(true); // 是否启用增量分析（默认开启）
-  const progressTimerRef = useRef(null);
+  const [editingMapping, setEditingMapping] = useState(null);
+  const [skipExtract, setSkipExtract] = useState(false);
+  const [incremental, setIncremental] = useState(true);
   const fileInputRef = useRef(null);
+
+  const {
+    analyzing, setAnalyzing,
+    analysisProgress, setAnalysisProgress,
+    startProgressPolling, stopProgressPolling,
+    pauseAnalysis, resumeAnalysis, cancelAnalysis, clearProgress,
+  } = useAnalysisProgress(project);
 
   async function loadMappingStore() {
     console.log('[LegacyCaseTab] loadMappingStore called', { project });
@@ -513,60 +561,6 @@ function LegacyCaseTab({ project, llm }) {
     }
   }
 
-  // 组件挂载时检查是否有正在进行的分析
-  useEffect(() => {
-    if (!project) return;
-    
-    // 尝试从localStorage恢复进度
-    const saved = localStorage.getItem(`analysis_progress_${project}`);
-    if (saved) {
-      try {
-        const { analyzing: wasAnalyzing, progress: savedProgress, timestamp } = JSON.parse(saved);
-        
-        // 如果保存的时间在2小时内，认为可能还在运行
-        const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-        if (timestamp > twoHoursAgo && wasAnalyzing) {
-          console.log('[LegacyCaseTab] Restoring analysis progress from localStorage');
-          setAnalyzing(true);
-          setAnalysisProgress(savedProgress);
-          
-          // 立即查询一次后端确认状态
-          api.legacyAnalysisProgress(project).then(progress => {
-            console.log('[LegacyCaseTab] Backend progress:', progress);
-            setAnalysisProgress(progress);
-            
-            // 如果仍在运行或暂停，启动轮询
-            if (['running', 'paused'].includes(progress.status)) {
-              console.log('[LegacyCaseTab] Starting progress polling');
-              startProgressPolling();
-            } else {
-              // 已经完成，清除状态
-              console.log('[LegacyCaseTab] Analysis already completed, clearing state');
-              setAnalyzing(false);
-              setAnalysisProgress(null);
-              localStorage.removeItem(`analysis_progress_${project}`);
-            }
-          }).catch(err => {
-            console.error('[LegacyCaseTab] Failed to restore progress:', err);
-            localStorage.removeItem(`analysis_progress_${project}`);
-            setAnalyzing(false);
-          });
-        } else {
-          console.log('[LegacyCaseTab] Saved progress expired, clearing');
-          localStorage.removeItem(`analysis_progress_${project}`);
-        }
-      } catch (e) {
-        console.error('[LegacyCaseTab] Failed to parse saved progress:', e);
-        localStorage.removeItem(`analysis_progress_${project}`);
-      }
-    }
-    
-    // 组件卸载时清理定时器
-    return () => {
-      stopProgressPolling();
-    };
-  }, [project]);
-
   async function analyze() {
     console.log('[LegacyCaseTab] analyze clicked', { project, llm });
     
@@ -615,87 +609,28 @@ function LegacyCaseTab({ project, llm }) {
       setMsg(msg);
       setTimeout(() => setMsg(''), 4000);
       await refresh();
-    } catch (e) { 
-      console.error('[LegacyCaseTab] analyze error:', e);
-      setErr(String(e.message || e)); 
+    } catch (e) {
+      setErr(String(e.message || e));
     } finally {
-      stopProgressPolling();
+      clearProgress();
       setBusy(false);
-      setAnalyzing(false);
-      setAnalysisProgress(null);
-      localStorage.removeItem(`analysis_progress_${project}`);
     }
   }
-  
-  function startProgressPolling() {
-    progressTimerRef.current = setInterval(async () => {
-      try {
-        const progress = await api.legacyAnalysisProgress(project);
-        setAnalysisProgress(progress);
-        
-        // 保存到localStorage
-        if (['running', 'paused'].includes(progress.status)) {
-          localStorage.setItem(`analysis_progress_${project}`, JSON.stringify({
-            analyzing: true,
-            progress: progress,
-            timestamp: Date.now()
-          }));
-        }
-        
-        // 如果已完成或取消，停止轮询
-        if (['completed', 'cancelled', 'error'].includes(progress.status)) {
-          stopProgressPolling();
-          setAnalyzing(false);
-          setBusy(false);
-          setAnalysisProgress(null);
-          localStorage.removeItem(`analysis_progress_${project}`);
-        }
-      } catch (e) {
-        console.error('[LegacyCaseTab] Failed to fetch progress:', e);
-      }
-    }, 2000);
+
+  async function handlePauseAnalysis() {
+    try { await pauseAnalysis(); setMsg('分析已暂停'); setTimeout(() => setMsg(''), 2000); }
+    catch (e) { setErr('暂停失败: ' + String(e.message || e)); }
   }
-  
-  function stopProgressPolling() {
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
+
+  async function handleResumeAnalysis() {
+    try { await resumeAnalysis(); setMsg('分析已继续'); setTimeout(() => setMsg(''), 2000); }
+    catch (e) { setErr('继续失败: ' + String(e.message || e)); }
   }
-  
-  async function pauseAnalysis() {
-    try {
-      await api.legacyAnalysisPause(project);
-      setMsg('分析已暂停');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (e) {
-      setErr('暂停失败: ' + String(e.message || e));
-    }
-  }
-  
-  async function resumeAnalysis() {
-    try {
-      await api.legacyAnalysisResume(project);
-      setMsg('分析已继续');
-      setTimeout(() => setMsg(''), 2000);
-    } catch (e) {
-      setErr('继续失败: ' + String(e.message || e));
-    }
-  }
-  
-  async function cancelAnalysis() {
+
+  async function handleCancelAnalysis() {
     if (!confirm('确定要取消分析吗？已处理的数据将丢失。')) return;
-    try {
-      await api.legacyAnalysisCancel(project);
-      setMsg('分析已取消');
-      stopProgressPolling();
-      setBusy(false);
-      setAnalyzing(false);
-      setAnalysisProgress(null);
-      setTimeout(() => setMsg(''), 2000);
-    } catch (e) {
-      setErr('取消失败: ' + String(e.message || e));
-    }
+    try { await cancelAnalysis(); setMsg('分析已取消'); setBusy(false); setTimeout(() => setMsg(''), 2000); }
+    catch (e) { setErr('取消失败: ' + String(e.message || e)); }
   }
   
   return (
@@ -726,7 +661,14 @@ function LegacyCaseTab({ project, llm }) {
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <AiModelSelect
+          value={selectedModel}
+          onChange={setSelectedModel}
+          defaultModel={defaultModel}
+          disabled={busy || files.length === 0}
+          title="选择五阶段分析模型"
+        />
         <button className="ghost" disabled={busy || files.length === 0} onClick={analyze}>
           <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>auto_awesome</span>
           运行五阶段分析
@@ -763,82 +705,13 @@ function LegacyCaseTab({ project, llm }) {
       </div>
       
       {/* 进度显示 */}
-      {analyzing && analysisProgress && (
-        <div className="card" style={{ padding: 16, marginBottom: 12, background: 'rgba(127,217,168,0.05)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="mi" style={{ color: '#cfbcff', fontSize: 20 }}>analytics</span>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{analysisProgress.stage_name || '分析中...'}</div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {analysisProgress.message}
-                  {analysisProgress.status === 'running' && (
-                    <span style={{ marginLeft: 8, color: '#7fd9a8' }}>● 后台运行中</span>
-                  )}
-                  {analysisProgress.status === 'paused' && (
-                    <span style={{ marginLeft: 8, color: '#ffc107' }}>● 已暂停</span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {analysisProgress.status === 'running' && (
-                <button className="ghost" onClick={pauseAnalysis} style={{ fontSize: 12 }}>
-                  <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>pause</span>
-                  暂停
-                </button>
-              )}
-              {analysisProgress.status === 'paused' && (
-                <button className="ghost" onClick={resumeAnalysis} style={{ fontSize: 12 }}>
-                  <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>play_arrow</span>
-                  继续
-                </button>
-              )}
-              <button className="danger-ghost" onClick={cancelAnalysis} style={{ fontSize: 12 }}>
-                <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>stop</span>
-                取消
-              </button>
-            </div>
-          </div>
-          
-          {/* 进度条 */}
-          <div style={{ background: '#2a2830', borderRadius: 4, height: 8, overflow: 'hidden', marginBottom: 8 }}>
-            <div 
-              style={{ 
-                width: `${analysisProgress.progress_percent || 0}%`, 
-                height: '100%',
-                background: 'linear-gradient(90deg, #7fd9a8, #cfbcff)',
-                transition: 'width 0.3s ease'
-              }}
-            />
-          </div>
-          
-          {/* 详细信息 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, fontSize: 12 }}>
-            <div>
-              <div className="muted">阶段</div>
-              <div style={{ fontWeight: 600 }}>{analysisProgress.current_stage}/{analysisProgress.total_stages}</div>
-            </div>
-            {analysisProgress.total_batches > 0 && (
-              <div>
-                <div className="muted">批次</div>
-                <div style={{ fontWeight: 600 }}>{analysisProgress.completed_batches}/{analysisProgress.total_batches}</div>
-              </div>
-            )}
-            <div>
-              <div className="muted">LLM调用</div>
-              <div style={{ fontWeight: 600 }}>{analysisProgress.llm_calls}</div>
-            </div>
-            <div>
-              <div className="muted">提取信号</div>
-              <div style={{ fontWeight: 600 }}>{analysisProgress.extracted_signals}</div>
-            </div>
-            <div>
-              <div className="muted">耗时</div>
-              <div style={{ fontWeight: 600 }}>{Math.floor(analysisProgress.elapsed_seconds / 60)}分{Math.floor(analysisProgress.elapsed_seconds % 60)}秒</div>
-            </div>
-          </div>
-        </div>
+      {analyzing && (
+        <AnalysisProgressPanel
+          progress={analysisProgress}
+          onPause={handlePauseAnalysis}
+          onResume={handleResumeAnalysis}
+          onCancel={handleCancelAnalysis}
+        />
       )}
       
       {msg && <p className="ok">{msg}</p>}
@@ -1262,7 +1135,7 @@ function LegacyXMindTab({ project }) {
 
 export default function Folders() {
   const [project] = useProject();
-  const [llm] = useLLM();
+  const [llm, selectedModel, setSelectedModel, defaultModel] = useScopedLLM('legacy-analysis');
   
   // 从localStorage恢复标签页状态
   const [tab, setTab] = useState(() => {
@@ -1332,7 +1205,15 @@ export default function Folders() {
       </div>
 
       {tab === 'docs' && <RequirementsTab project={project} />}
-      {tab === 'cases' && <LegacyCaseTab project={project} llm={llm} />}
+      {tab === 'cases' && (
+        <LegacyCaseTab
+          project={project}
+          llm={llm}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          defaultModel={defaultModel}
+        />
+      )}
       {tab === 'xmind' && <LegacyXMindTab project={project} />}
     </div>
   );

@@ -7,6 +7,11 @@ const LS_CHATS = (project) => `casemind.chats.${project}`;
 const LS_ACTIVE_CHAT = (project) => `casemind.chats.${project}.active`;
 const LS_LAST = (project) => `casemind.last.${project}`;
 
+// sessionStorage keys (per-project, cleared when browser closes)
+const SS_PROJECT_KEY = (project) => `casemind.pkey.${project}`;
+// localStorage keys (per-project, persists across sessions)
+const LS_PROJECT_KEY = (project) => `casemind.pkey.${project}`;
+
 export function getProject() {
   return localStorage.getItem(LS_PROJECT) || '';
 }
@@ -22,6 +27,41 @@ export function useProject() {
     return () => window.removeEventListener('casemind:project', h);
   }, []);
   return [p, setProject];
+}
+
+// 改从 localStorage 和 sessionStorage 都获取，优先 localStorage（记住密码）
+
+export function getProjectKey(project) {
+  if (!project) return '';
+  return localStorage.getItem(LS_PROJECT_KEY(project))
+      || sessionStorage.getItem(SS_PROJECT_KEY(project))
+      || '';
+}
+
+export function isProjectKeyRemembered(project) {
+  if (!project) return false;
+  return !!localStorage.getItem(LS_PROJECT_KEY(project));
+}
+
+export function setProjectKey(project, key, remember = false) {
+  if (!project) return;
+  if (key) {
+    if (remember) {
+      localStorage.setItem(LS_PROJECT_KEY(project), key);
+      sessionStorage.removeItem(SS_PROJECT_KEY(project));
+    } else {
+      sessionStorage.setItem(SS_PROJECT_KEY(project), key);
+      localStorage.removeItem(LS_PROJECT_KEY(project));
+    }
+  } else {
+    clearProjectKey(project);
+  }
+}
+
+export function clearProjectKey(project) {
+  if (!project) return;
+  sessionStorage.removeItem(SS_PROJECT_KEY(project));
+  localStorage.removeItem(LS_PROJECT_KEY(project));
 }
 
 // 仅保留 OpenRouter。历史数据如果存的是旧 provider（mimo / custom）或扁平格式，
@@ -133,12 +173,81 @@ export function setActiveChatId(project, id) {
   localStorage.setItem(LS_ACTIVE_CHAT(project), id || '');
   window.dispatchEvent(new Event('casemind:chats'));
 }
+
+// --- backend sync (avoid losing chats on browser cache clear) ---
+const _chatsBackupTimers = new Map();      // project -> timer id
+const _chatsHydrated = new Set();          // projects already hydrated this session
+
+function _maxUpdatedAt(chats) {
+  let m = 0;
+  for (const c of chats || []) {
+    const t = Math.max(c.updatedAt || 0, c.createdAt || 0);
+    if (t > m) m = t;
+  }
+  return m;
+}
+
+function scheduleChatsBackup(project) {
+  if (!project) return;
+  const prev = _chatsBackupTimers.get(project);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(async () => {
+    _chatsBackupTimers.delete(project);
+    try {
+      const { api } = await import('./api.js');
+      await api.saveChats(project, getChats(project), getActiveChatId(project));
+    } catch (e) {
+      // 备份失败不影响本地体验，下一次保存再试
+      console.warn('[chats] backend backup failed:', e?.message || e);
+    }
+  }, 800);
+  _chatsBackupTimers.set(project, t);
+}
+
+// 全局监听 chats 变更 → 自动备份到后端（捕获所有路径：setChats/直接 setItem/mutateMsgByPredicate）
+let _chatsBackupListenerInstalled = false;
+function _installChatsBackupListener() {
+  if (_chatsBackupListenerInstalled || typeof window === 'undefined') return;
+  _chatsBackupListenerInstalled = true;
+  window.addEventListener('casemind:chats', () => {
+    const p = getProject();
+    if (p) scheduleChatsBackup(p);
+  });
+}
+
+async function hydrateChatsFromBackend(project) {
+  if (!project || _chatsHydrated.has(project)) return;
+  _chatsHydrated.add(project);
+  try {
+    const { default: api } = await import('./api.js');
+    const r = await api.loadChats(project);
+    const remote = Array.isArray(r?.chats) ? r.chats : [];
+    const local = getChats(project);
+    const remoteNewer = _maxUpdatedAt(remote) > _maxUpdatedAt(local);
+    if (remote.length > 0 && (local.length === 0 || remoteNewer)) {
+      localStorage.setItem(LS_CHATS(project), JSON.stringify(remote));
+      if (r.active_id) {
+        localStorage.setItem(LS_ACTIVE_CHAT(project), r.active_id);
+      }
+      window.dispatchEvent(new Event('casemind:chats'));
+    } else if (local.length > 0 && remote.length === 0) {
+      // 本地有数据但后端为空：立即推一次，作为基础备份
+      scheduleChatsBackup(project);
+    }
+  } catch (e) {
+    // 后端不可用 → 仅用本地缓存继续运行
+    console.warn('[chats] backend hydrate failed:', e?.message || e);
+  }
+}
+
 export function useChats(project) {
   const [chats, setC] = useState(() => getChats(project));
   const [activeId, setA] = useState(() => getActiveChatId(project));
   useEffect(() => {
     const h = () => { setC(getChats(project)); setA(getActiveChatId(project)); };
     h();
+    _installChatsBackupListener();
+    hydrateChatsFromBackend(project);
     window.addEventListener('casemind:chats', h);
     window.addEventListener('casemind:project', h);
     return () => {
@@ -161,6 +270,27 @@ export function newChat(mode = 'qa') {
     updatedAt: Date.now(),
     messages: [], // {role: 'user'|'assistant', content, sources?, thinking?}
   };
+}
+
+// --------- stream output preference ---------
+const LS_STREAM = 'casemind.stream_output';
+
+export function getStreamOutput() {
+  const v = localStorage.getItem(LS_STREAM);
+  return v === 'true';
+}
+export function setStreamOutput(val) {
+  localStorage.setItem(LS_STREAM, val ? 'true' : 'false');
+  window.dispatchEvent(new Event('casemind:stream'));
+}
+export function useStreamOutput() {
+  const [v, setV] = useState(() => getStreamOutput());
+  useEffect(() => {
+    const h = () => setV(getStreamOutput());
+    window.addEventListener('casemind:stream', h);
+    return () => window.removeEventListener('casemind:stream', h);
+  }, []);
+  return [v, (val) => { setStreamOutput(val); setV(val); }];
 }
 
 // --------- last results (per project) ---------

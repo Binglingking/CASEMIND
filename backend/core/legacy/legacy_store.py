@@ -202,12 +202,36 @@ def save_style_profile(project: str, profile: StyleProfile) -> None:
 
 # ---- 反哺候选 ----
 
+_LEGACY_STATUS_MAP = {
+    "pending": "pending_review",
+    "accepted": "ready_to_build",
+    "auto_accepted": "ready_to_build",
+}
+
+
+def _migrate_inferred_status(it: dict) -> dict:
+    """旧 review_status 值 → 新三态。
+
+    pending/accepted/auto_accepted 在 1.1 期间被重命名为
+    pending_review/ready_to_build/promoted。已含 promoted_kp_id 的 accepted
+    条目说明已经写入 knowledge_points.json → 直接标 promoted；
+    其余 accepted/auto_accepted 进入 ready_to_build 队列。
+    """
+    status = it.get("review_status")
+    if status in _LEGACY_STATUS_MAP:
+        if status in ("accepted", "auto_accepted") and it.get("promoted_kp_id"):
+            it["review_status"] = "promoted"
+        else:
+            it["review_status"] = _LEGACY_STATUS_MAP[status]
+    return it
+
+
 def load_inferred_kps(project: str) -> list[InferredKnowledgePoint]:
     raw = _read_json(legacy_dir(project) / "inferred_kps.json", [])
     out: list[InferredKnowledgePoint] = []
     for it in raw:
         try:
-            out.append(InferredKnowledgePoint.model_validate(it))
+            out.append(InferredKnowledgePoint.model_validate(_migrate_inferred_status(it)))
         except Exception:
             continue
     return out

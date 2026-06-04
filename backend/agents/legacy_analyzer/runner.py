@@ -39,6 +39,15 @@ from backend.schemas.style_profile import (
 logger = logging.getLogger(__name__)
 
 
+def _read_features():
+    try:
+        from backend.api.routes_settings import get_runtime_features
+        return get_runtime_features()
+    except Exception:  # noqa: BLE001
+        from backend.config import settings
+        return settings.features
+
+
 def run(
     project: str,
     *,
@@ -146,10 +155,15 @@ def run(
         logger.info("[Stage 4.5] AI 归纳反哺候选...")
         stage5_start = time.time()
         summarize_errors: list[str] = []
-        if not skip_extract and aggregated.items:
+        features = _read_features()
+        if not getattr(features, "enable_legacy_inference", False):
+            inferred = []
+            logger.info("[Stage 5] legacy inference disabled; skip inferred KP generation")
+        elif not skip_extract and aggregated.items:
             # AI 归纳模式
             inferred, summarize_calls, summarize_errors = stage5_inferred.summarize_signals(
                 aggregated, batch, cfg=cfg,
+                auto_accept=getattr(features, "enable_legacy_inference_auto_accept", False),
             )
             llm_calls += summarize_calls
             errors.extend(summarize_errors)
@@ -171,8 +185,9 @@ def run(
         stage5_elapsed = time.time() - stage5_start
 
         # 统计 auto_accepted 数量
-        auto_count = sum(1 for ikp in inferred if ikp.review_status == "auto_accepted")
-        pending_count = sum(1 for ikp in inferred if ikp.review_status == "pending")
+        auto_count = sum(1 for ikp in inferred if ikp.review_status == "ready_to_build")
+        pending_count = sum(1 for ikp in inferred if ikp.review_status in ("pending_review", "pending"))
+        file_summary_count = len([ikp for ikp in inferred if ikp.aggregated_from])
         logger.info(
             f"[Stage 5] 完成，耗时 {stage5_elapsed:.1f}s，生成 {len(inferred)} 个反哺候选 "
             f"(auto_accepted={auto_count}, pending={pending_count})"
@@ -240,6 +255,9 @@ def run(
             aggregated_count=len(aggregated.items),
             style_stats=style_stats,
             inferred_count=len(inferred),
+            pending_review_count=pending_count,
+            ready_to_build_count=auto_count,
+            file_summary_count=file_summary_count,
             errors=errors,
         )
     

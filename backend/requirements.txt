@@ -13,6 +13,8 @@ numpy==1.26.4
 # ---- 混合检索 + 中文分词（PR1 起引入）----
 rank-bm25==0.2.2
 jieba==0.42.1
+# ---- PDF 报告生成 ----
+fpdf2==2.7.9
 # Optional: FAISS accelerator. If install fails on your Python/Windows,
 # just skip it — VectorStore auto-falls-back to a NumPy cosine index.
 # pip install faiss-cpu==1.8.0

@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
+import mimetypes
+import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.api import (
-    routes_case_gen, routes_conflict, routes_coverage,
-    routes_feedback, routes_knowledge, routes_legacy, routes_settings,
+    routes_batch, routes_case_gen, routes_conflict, routes_coverage,
+    routes_feedback, routes_feishu, routes_knowledge, routes_legacy, routes_settings,
 )
+from backend.config import settings
 from backend.core.llm import LLMConfig
 from backend.core.project import project_manager
+from backend.core.timeutil import utc_iso_z
 from backend.core.vector_store import VectorStore
 from backend.services import (
     build_log_service, folder_service, memory_service, memory_version_service,
@@ -35,12 +44,18 @@ router.include_router(routes_conflict.router, prefix="/conflict")
 router.include_router(routes_feedback.router, prefix="/feedback")
 # 历史用例 / 历史 XMind / 反哺候选 挂到 /api/legacy/* 下
 router.include_router(routes_legacy.router, prefix="/legacy")
+# 飞书集成挂到 /api/feishu/* 下（受 enable_feishu_integration + 项目级 enabled 双重控制）
+router.include_router(routes_feishu.router, prefix="/feishu")
+# 批量生成（拆分+逐单元生成）挂到 /api/batch/* 下
+router.include_router(routes_batch.router, prefix="/batch")
 
 
 # ---------- schemas ----------
 
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
+    owner: Optional[str] = None
+    password: Optional[str] = None
 
 
 class FolderBody(BaseModel):
@@ -80,6 +95,7 @@ class PromptSaveBody(BaseModel):
 class ChatMessage(BaseModel):
     role: str  # "user" | "assistant"
     content: str
+    images: Optional[list[str]] = None  # 图片 URL 列表
 
 
 class QueryBody(BaseModel):
@@ -90,6 +106,7 @@ class QueryBody(BaseModel):
     llm: LLMSettings
     history: Optional[list[ChatMessage]] = None
     mentions: Optional[list[dict]] = None  # [{type: "legacy_case"|"legacy_xmind"|"doc"|"output", ...}]
+    images: Optional[list[str]] = None  # 上传的图片 URL 列表
 
 
 # ---------- projects ----------
@@ -102,7 +119,10 @@ def list_projects():
 @router.post("/projects")
 def create_project(body: ProjectCreate):
     try:
-        return project_manager.create(body.name)
+        meta = project_manager.create(body.name)
+        if body.owner and body.password:
+            meta = project_manager.set_password(body.name, body.owner, body.password)
+        return meta
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -123,10 +143,53 @@ class ProjectDeleteBody(BaseModel):
     name: str
 
 
+class UnlockBody(BaseModel):
+    password: str
+
+
+class SetPasswordBody(BaseModel):
+    owner: str
+    password: str
+
+
+class ChangePasswordBody(BaseModel):
+    old_password: str
+    new_password: str
+
+
 @router.delete("/projects")
 def delete_project(body: ProjectDeleteBody):
     try:
         return project_manager.delete(body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/projects/{name}/unlock")
+def unlock_project(name: str, body: UnlockBody):
+    """验证项目密码，成功则返回 ok。"""
+    if not project_manager.verify_password(name, body.password):
+        raise HTTPException(403, "密码错误")
+    meta = project_manager.get_meta(name)
+    return {"ok": True, "project": name, "owner": meta.get("owner", "")}
+
+
+@router.post("/projects/{name}/set-password")
+def set_project_password(name: str, body: SetPasswordBody):
+    """为项目首次设置密码（或修改密码）。"""
+    try:
+        meta = project_manager.set_password(name, body.owner, body.password)
+        return {"ok": True, **meta}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/projects/{name}/change-password")
+def change_project_password(name: str, body: ChangePasswordBody):
+    """修改项目密码（需验证原密码）。"""
+    try:
+        meta = project_manager.change_password(name, body.old_password, body.new_password)
+        return {"ok": True, **meta}
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -179,6 +242,20 @@ def open_local_file(body: OpenFileBody):
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(500, str(e))
+
+
+@router.post("/folders/upload")
+async def upload_files(project: str = Form(...), files: list[UploadFile] = File(...)):
+    """Upload requirement doc files (.md/.docx/.pdf/.txt/.markdown).
+    Files are saved to memory/<project>/uploads/ and auto-registered as a folder."""
+    pairs = []
+    for f in files:
+        content = await f.read()
+        pairs.append((f.filename or "unnamed", content))
+    try:
+        return folder_service.upload_files(project, pairs)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ---------- scan / build ----------
@@ -316,19 +393,62 @@ def augment_memory(body: MemoryAugmentBody):
 @router.post("/query")
 def query(body: QueryBody):
     mode = body.mode.lower().strip()
-    if mode not in {"qa", "chat", "testcase", "xmind"}:
-        raise HTTPException(400, "mode must be qa | chat | testcase | xmind")
+    if mode not in {"qa", "chat", "testcase", "xmind", "req_analysis"}:
+        raise HTTPException(400, "mode must be qa | chat | testcase | xmind | req_analysis")
     cfg = LLMConfig(body.llm.base_url, body.llm.api_key, body.llm.model)
     history = [m.model_dump() for m in (body.history or [])]
     try:
         return query_service.query(
             body.project, body.question, mode, cfg, body.top_k, history,
             mentions=body.mentions or [],
+            images=body.images or [],
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
         raise HTTPException(500, str(e))
+
+
+# ---------- query stream ----------
+
+@router.post("/query/stream")
+async def query_stream(body: QueryBody):
+    """SSE 流式查询端点。"""
+    mode = body.mode.lower().strip()
+    if mode not in {"qa", "chat", "testcase", "xmind", "req_analysis"}:
+        raise HTTPException(400, "mode must be qa | chat | testcase | xmind | req_analysis")
+    cfg = LLMConfig(body.llm.base_url, body.llm.api_key, body.llm.model)
+    history = [m.model_dump() for m in (body.history or [])]
+
+    from backend.services.query_service import query_stream as qs
+
+    def _sse_encode(event: str, data: str) -> str:
+        """将事件编码为 SSE 格式，支持 data 中包含换行。"""
+        lines = [f"event: {event}"]
+        for dline in data.split("\n"):
+            lines.append(f"data: {dline}")
+        return "\n".join(lines) + "\n\n"
+
+    async def event_generator():
+        try:
+            for evt, text in qs(
+                body.project, body.question, mode, cfg, body.top_k, history,
+                mentions=body.mentions or [],
+                images=body.images or [],
+            ):
+                yield _sse_encode(evt, text)
+        except Exception as e:
+            yield _sse_encode("error", str(e))
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------- outputs ----------
@@ -361,6 +481,20 @@ def get_output_content(project: str, kind: str, filename: str):
         return output_service.read_output_content(project, kind, filename)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.get("/outputs/download")
+def download_output(project: str, kind: str, filename: str):
+    try:
+        target = output_service.output_path(project, kind, filename)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    content_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(
+        target,
+        media_type=content_type or "application/octet-stream",
+        filename=target.name,
+    )
 
 
 @router.put("/outputs/rename")
@@ -482,9 +616,145 @@ def export_excel(body: ExcelExportBody):
     )
 
 
+# ---------- image upload ----------
+
+def _image_dir(project: str) -> Path:
+    d = project_manager.mem_dir(project) / "images"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+
+@router.post("/upload")
+async def upload_images(project: str = Form(...), images: list[UploadFile] = File(...)):
+    """Upload images for chat. Supports PNG, JPG, JPEG, GIF, WebP up to 10 MB each."""
+    max_bytes = settings.max_image_size_mb * 1024 * 1024
+    result = []
+    for img in images:
+        # 文件名校验
+        fname = (img.filename or "image").strip()
+        ext = Path(fname).suffix.lower()
+        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+            raise HTTPException(
+                400,
+                f"不支持的图片格式: {ext}。允许的格式: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}",
+            )
+        content = await img.read()
+        if len(content) > max_bytes:
+            raise HTTPException(
+                400,
+                f"图片 {fname} 大小 {len(content) / 1024 / 1024:.1f} MB 超过限制 ({settings.max_image_size_mb} MB)",
+            )
+        # 校验实际 MIME 类型
+        content_type = img.content_type or ""
+        if content_type and content_type not in settings.allowed_image_types:
+            raise HTTPException(
+                400,
+                f"不支持的图片类型: {content_type}。允许: {', '.join(settings.allowed_image_types)}",
+            )
+        # 生成唯一文件名
+        ts = int(time.time() * 1000)
+        uid = uuid.uuid4().hex[:8]
+        safe_name = f"{ts}_{uid}{ext}"
+        dest = _image_dir(project) / safe_name
+        dest.write_bytes(content)
+        url = f"/api/images/{project}/{safe_name}"
+        result.append({"filename": safe_name, "original_name": fname, "url": url, "size": len(content)})
+    return {"ok": True, "images": result}
+
+
+@router.get("/images/{project}/{filename}")
+def serve_image(project: str, filename: str):
+    """Serve uploaded images."""
+    p = _image_dir(project) / filename
+    if not p.exists():
+        raise HTTPException(404, "图片不存在")
+    content_type, _ = mimetypes.guess_type(str(p))
+    return FileResponse(p, media_type=content_type or "image/png")
+
+
+# ---------- chats persistence ----------
+
+class ChatsSaveBody(BaseModel):
+    project: str
+    chats: list[dict]  # 完整的对话列表
+    active_id: str = ""  # 当前激活的对话 ID
+
+
+def _chats_path(project: str) -> Path:
+    d = project_manager.mem_dir(project) / "chats"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "chats.json"
+
+
+@router.get("/chats/{project}")
+def get_chats(project: str):
+    """加载项目的所有对话记录。"""
+    try:
+        p = _chats_path(project)
+        if not p.exists():
+            return {"project": project, "chats": [], "active_id": ""}
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {
+            "project": project,
+            "chats": data.get("chats", []),
+            "active_id": data.get("active_id", ""),
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/chats/{project}")
+def save_chats(project: str, body: ChatsSaveBody):
+    """保存项目的所有对话记录。"""
+    try:
+        p = _chats_path(project)
+        data = {
+            "chats": body.chats,
+            "active_id": body.active_id,
+            "saved_at": utc_iso_z(),
+        }
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "project": project, "count": len(body.chats)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/health")
 def health():
     return {"ok": True}
+
+
+# ---------- requirement analysis report PDF ----------
+
+class ReqAnalysisReportBody(BaseModel):
+    project: str
+    analysis_json: str  # JSON string of the analysis result
+
+
+@router.post("/query/req-analysis/report")
+def generate_req_analysis_report(body: ReqAnalysisReportBody):
+    """Generate a PDF report for requirement analysis results."""
+    try:
+        import json as _json
+        data = _json.loads(body.analysis_json)
+    except Exception:
+        raise HTTPException(400, "Invalid analysis JSON")
+
+    try:
+        from backend.services.req_analysis_service import generate_pdf_report
+        pdf_bytes = generate_pdf_report(body.project, data)
+        import base64
+        return {
+            "ok": True,
+            "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+            "filename": f"需求分析报告_{body.project}.pdf",
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"PDF生成失败: {str(e)}")
 
 
 # ---------- diagnostics ----------

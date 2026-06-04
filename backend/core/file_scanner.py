@@ -29,6 +29,9 @@ def scan_folder(root: str) -> list[ScannedFile]:
     for f in p.rglob("*"):
         if not f.is_file():
             continue
+        # 跳过 Office 临时文件（如 ~$xxx.docx）
+        if f.name.startswith("~$"):
+            continue
         if f.suffix.lower() not in SUPPORTED_EXTS:
             continue
         try:

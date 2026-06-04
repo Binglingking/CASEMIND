@@ -115,4 +115,7 @@ class AnalyzerRunResult(BaseModel):
     aggregated_count: int
     style_stats: StyleStats
     inferred_count: int
+    pending_review_count: int = 0
+    ready_to_build_count: int = 0
+    file_summary_count: int = 0
     errors: list[str] = Field(default_factory=list)

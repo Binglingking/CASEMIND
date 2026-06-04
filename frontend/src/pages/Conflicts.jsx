@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { useLLM, useProject } from '../store.js';
+import { useProject } from '../store.js';
+import AiModelSelect, { useScopedLLM } from '../components/AiModelSelect.jsx';
 
 const TYPE_LABEL = {
   numeric: '数值',
@@ -28,7 +29,7 @@ function fmtTime(iso) {
 
 export default function Conflicts() {
   const [project] = useProject();
-  const [llm] = useLLM();
+  const [llm, selectedModel, setSelectedModel, defaultModel] = useScopedLLM('conflict-detect');
   const [list, setList] = useState([]);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -117,7 +118,14 @@ export default function Conflicts() {
             结果落盘，可标注处置，不会重复检测同一对。
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <AiModelSelect
+            value={selectedModel}
+            onChange={setSelectedModel}
+            defaultModel={defaultModel}
+            disabled={busy || !project}
+            title="选择冲突检测模型"
+          />
           <button className="primary" disabled={busy || !project} onClick={runDetect}>
             <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>search</span>
             运行检测

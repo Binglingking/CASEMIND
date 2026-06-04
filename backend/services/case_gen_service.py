@@ -48,6 +48,22 @@ def run_step(project: str, pipeline_id: str, step_n: int,
     state = pipeline_io.load_state(project, pipeline_id)
     pl = CaseGenPipeline(project)
     out = pl.run_step(state, step_n, llm_cfg=cfg)
+    # F3 旁路通知：仅当 step4 完成（整条流水线完结）时触发
+    if step_n == 4 and getattr(state, "current_step", "") == "completed":
+        try:
+            from backend.integrations.feishu.notifier import notify_case_gen_done
+            step4 = pipeline_io.read_step_output(project, pipeline_id, 4) or {}
+            valid = step4.get("valid_cases") or []
+            warnings = step4.get("warnings") or []
+            notify_case_gen_done(
+                project=project,
+                pipeline_id=pipeline_id,
+                case_count=len(valid),
+                warnings_count=len(warnings),
+            )
+        except Exception:
+            # 旁路通知失败不影响主流程
+            pass
     return state, out
 
 

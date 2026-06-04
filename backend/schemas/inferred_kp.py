@@ -14,7 +14,12 @@ from backend.schemas.knowledge_point import KPType
 
 
 SourceKind = Literal["case", "xmind"]
-ReviewStatus = Literal["pending", "accepted", "rejected", "auto_accepted"]
+ReviewStatus = Literal[
+    "pending_review",
+    "ready_to_build",
+    "promoted",
+    "rejected",
+]
 
 
 class InferredSource(BaseModel):
@@ -29,13 +34,14 @@ class InferredSource(BaseModel):
 
 
 class InferredKnowledgePoint(BaseModel):
-    """待审核/已审核的反哺候选。
+    """待审核 / 待提升 / 已提升的反哺候选。
 
     review_status 说明：
-      - pending: 待人工审核（置信度中等，AI 不确定）
-      - auto_accepted: AI 高置信度自动通过，已直接写入 KP 库（用户可撤销）
-      - accepted: 人工审核通过
-      - rejected: 人工/自动拒绝
+      - pending_review: 待人工审核（AI 置信度不足或未开启自动通过）
+      - ready_to_build: 审核通过或 AI 高置信度自动通过，进入 build 队列
+                        （等待下次 Memory 构建时提升为正式 KP）
+      - promoted: 已在 Memory 构建期间写入 knowledge_points.json
+      - rejected: 人工拒绝
     """
     inferred_id: str                   # IKP_<sha1[:8]>
     type: KPType
@@ -53,12 +59,12 @@ class InferredKnowledgePoint(BaseModel):
     confidence: float = 0.7            # 反推默认低于直接抽取
     reasoning: str = ""                # LLM 给出的推理依据，便于审核
     auto_accepted: bool = False
-    """True 表示 AI 判定高置信度（≥0.9）自动通过；用户可重置为 pending 以撤销。"""
+    """True 表示 AI 判定高置信度（≥0.9）自动通过；用户可撤销重置为 pending_review。"""
     extracted_at: str                  # ISO8601 UTC
-    review_status: ReviewStatus = "pending"
+    review_status: ReviewStatus = "pending_review"
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[str] = None
-    promoted_kp_id: Optional[str] = None   # accepted/auto_accepted 后写入 knowledge_points.json 的 KP id
+    promoted_kp_id: Optional[str] = None   # promoted 后写入 knowledge_points.json 的 KP id
 
 
 class InferredBatch(BaseModel):

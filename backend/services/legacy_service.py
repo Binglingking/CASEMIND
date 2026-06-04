@@ -171,6 +171,18 @@ def ingest_excel(
     )
     legacy_store.upsert_case_file(project, meta, cases)
 
+    # F3 旁路通知：失败不影响主流程
+    try:
+        from backend.integrations.feishu.notifier import notify_legacy_ingest_done
+        notify_legacy_ingest_done(
+            project=project,
+            filename=safe_name,
+            case_count=len(cases),
+            warnings_count=len(warnings),
+        )
+    except Exception as e:
+        logger.debug("[feishu] notify skipped: %s", e)
+
     return ExcelIngestResult(
         file_id=fid,
         already_parsed=False,
@@ -273,6 +285,22 @@ def list_inferred(project: str, status: str | None = None) -> list[dict]:
     return [i.model_dump() for i in items]
 
 
+def inferred_stats(project: str) -> dict:
+    items = legacy_store.load_inferred_kps(project)
+    by_status: dict[str, int] = {}
+    for item in items:
+        by_status[item.review_status] = by_status.get(item.review_status, 0) + 1
+    return {
+        "total_count": len(items),
+        "by_status": by_status,
+        "pending_review_count": by_status.get("pending_review", 0),
+        "ready_to_build_count": by_status.get("ready_to_build", 0),
+        "promoted_count": by_status.get("promoted", 0),
+        "rejected_count": by_status.get("rejected", 0),
+        "file_summary_count": len([i for i in items if i.aggregated_from]),
+    }
+
+
 def review_inferred(
     project: str,
     inferred_id: str,
@@ -280,8 +308,8 @@ def review_inferred(
     reviewer: str = "",
 ) -> dict:
     """decision: 'accept' | 'reject'。
-    accept 仅改状态为 accepted；真正写入 knowledge_points.json 由
-    Memory 模块的合并入口负责（不在此服务内自动合并）。
+    accept 将状态切到 ready_to_build（进入 build 队列）；rejected 直接拒绝。
+    真正写入 knowledge_points.json 由 Memory 构建流程触发，本服务不会自动合并。
     """
     if decision not in ("accept", "reject"):
         raise ValueError("decision must be 'accept' or 'reject'")
@@ -289,7 +317,7 @@ def review_inferred(
     target = next((i for i in items if i.inferred_id == inferred_id), None)
     if target is None:
         raise ValueError(f"inferred_id 不存在: {inferred_id}")
-    target.review_status = "accepted" if decision == "accept" else "rejected"
+    target.review_status = "ready_to_build" if decision == "accept" else "rejected"
     target.reviewed_at = utc_iso_z()
     target.reviewed_by = reviewer or None
     legacy_store.save_inferred_kps(project, items)
@@ -330,7 +358,7 @@ def batch_review_inferred(
             # 如果某个ID不存在，跳过它
             continue
         
-        target.review_status = "accepted" if decision == "accept" else "rejected"
+        target.review_status = "ready_to_build" if decision == "accept" else "rejected"
         target.reviewed_at = utc_iso_z()
         target.reviewed_by = reviewer or None
         results.append(target.model_dump())
@@ -340,13 +368,14 @@ def batch_review_inferred(
     return results
 
 
-def promote_accepted_inferred(project: str) -> dict:
-    """将 accepted / auto_accepted 的 InferredKnowledgePoint 提升为正式 KnowledgePoint。
+def promote_ready_to_build(project: str) -> dict:
+    """将 ready_to_build 的 InferredKnowledgePoint 提升为正式 KnowledgePoint。
 
-    读取 inferred_kps.json 中 review_status 为 'accepted' 或 'auto_accepted' 且
-    promoted_kp_id 为空的条目，转换为 KnowledgePoint 并写入 knowledge_points.json。
+    读取 inferred_kps.json 中 review_status == 'ready_to_build' 的条目，
+    转换为 KnowledgePoint 并写入 knowledge_points.json，同时将候选状态切到
+    'promoted' 并写回 promoted_kp_id。
 
-    此函数设计为幂等：已提升的条目（promoted_kp_id 非空）会被跳过。
+    此函数设计为幂等：已 promoted（或带 promoted_kp_id）的条目不会被重复处理。
 
     Returns
     -------
@@ -356,23 +385,23 @@ def promote_accepted_inferred(project: str) -> dict:
     from backend.schemas.knowledge_point import KnowledgePoint, KPSource
 
     inferred = legacy_store.load_inferred_kps(project)
-    accepted = [i for i in inferred
-                if i.review_status in ("accepted", "auto_accepted") and not i.promoted_kp_id]
+    ready = [i for i in inferred
+             if i.review_status == "ready_to_build" and not i.promoted_kp_id]
 
-    if not accepted:
+    if not ready:
         return {
             "promoted_count": 0,
             "kp_ids": [],
             "skipped_already_promoted": len(
                 [i for i in inferred
-                 if i.review_status in ("accepted", "auto_accepted") and i.promoted_kp_id]
+                 if i.review_status == "promoted" or i.promoted_kp_id]
             ),
         }
 
     now = utc_iso_z()
     new_kps: list[KnowledgePoint] = []
 
-    for ikp in accepted:
+    for ikp in ready:
         kp_id = kp_store.next_kp_id(project, ikp.module, ikp.type)
 
         # 构造溯源信息：优先使用聚合源列表
@@ -411,16 +440,19 @@ def promote_accepted_inferred(project: str) -> dict:
             orphan=False,
         ))
         ikp.promoted_kp_id = kp_id
+        ikp.review_status = "promoted"
+        if not ikp.reviewed_at:
+            ikp.reviewed_at = now
 
     # 写入 knowledge_points.json
     existing = kp_store.load_all(project)
     kp_store.save_all(project, existing + new_kps)
 
-    # 回写 inferred_kps.json（更新 promoted_kp_id，保证下次幂等跳过）
+    # 回写 inferred_kps.json（更新 promoted_kp_id + review_status，保证下次幂等跳过）
     legacy_store.save_inferred_kps(project, inferred)
 
     logger.info(
-        "[legacy] promote_accepted_inferred project=%s promoted=%d",
+        "[legacy] promote_ready_to_build project=%s promoted=%d",
         project, len(new_kps),
     )
 
@@ -429,30 +461,37 @@ def promote_accepted_inferred(project: str) -> dict:
         "kp_ids": [kp.kp_id for kp in new_kps],
         "skipped_already_promoted": len(
             [i for i in inferred
-             if i.review_status in ("accepted", "auto_accepted") and i.promoted_kp_id]
+             if i.review_status == "promoted" or i.promoted_kp_id]
         ),
     }
 
 
-def revoke_auto_accepted(project: str, inferred_id: str) -> dict | None:
-    """撤销 AI 自动通过的候选，将其重置为 pending 状态供人工重新审核。
+# Backward-compatible alias for callers still importing the old name.
+promote_accepted_inferred = promote_ready_to_build
 
-    仅对 review_status='auto_accepted' 的条目有效；已人工 accept 的不受影响。
+
+def revoke_auto_accepted(project: str, inferred_id: str) -> dict | None:
+    """撤销 AI 自动通过的候选，将其重置为 pending_review 状态供人工重新审核。
+
+    仅对仍在 build 队列（review_status='ready_to_build' 且 auto_accepted=True）
+    的条目有效。已 promoted（已写入 knowledge_points.json）或人工 accept 的
+    条目不允许撤销。
     """
     items = legacy_store.load_inferred_kps(project)
     target = next((i for i in items if i.inferred_id == inferred_id), None)
     if target is None:
         return None
-    if target.review_status != "auto_accepted":
+    if target.review_status != "ready_to_build" or not target.auto_accepted:
         raise ValueError(
-            f"只能撤销 auto_accepted 状态，当前为 {target.review_status}"
+            f"只能撤销 AI 自动通过且仍在 build 队列的条目，当前状态为 "
+            f"{target.review_status} / auto_accepted={target.auto_accepted}"
         )
-    target.review_status = "pending"
+    target.review_status = "pending_review"
     target.auto_accepted = False
     target.reviewed_by = None
     target.reviewed_at = None
     legacy_store.save_inferred_kps(project, items)
-    logger.info("[legacy] revoke_auto_accepted %s → pending", inferred_id)
+    logger.info("[legacy] revoke_auto_accepted %s → pending_review", inferred_id)
     return target.model_dump()
 
 
@@ -460,7 +499,7 @@ def update_inferred_content(
     project: str, inferred_id: str, content: str,
     editor: str = "",
 ) -> dict | None:
-    """用户二次编辑反哺候选的内容（适用于 auto_accepted 和 accepted）。"""
+    """用户二次编辑反哺候选的内容（适用于 ready_to_build / pending_review 状态）。"""
     items = legacy_store.load_inferred_kps(project)
     target = next((i for i in items if i.inferred_id == inferred_id), None)
     if target is None:
