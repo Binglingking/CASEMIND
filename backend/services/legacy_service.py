@@ -171,6 +171,18 @@ def ingest_excel(
     )
     legacy_store.upsert_case_file(project, meta, cases)
 
+    # F3 旁路通知：失败不影响主流程
+    try:
+        from backend.integrations.feishu.notifier import notify_legacy_ingest_done
+        notify_legacy_ingest_done(
+            project=project,
+            filename=safe_name,
+            case_count=len(cases),
+            warnings_count=len(warnings),
+        )
+    except Exception as e:
+        logger.debug("[feishu] notify skipped: %s", e)
+
     return ExcelIngestResult(
         file_id=fid,
         already_parsed=False,

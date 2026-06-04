@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
-  useLLM, useProject, useChats, newChat, useLast,
+  useLLM, useProject, useChats, newChat, useLast, getStreamOutput,
 } from '../store.js';
+
+const MAX_IMAGE_SIZE_MB = 10;
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 function splitThinking(text) {
   if (!text) return { thinking: '', answer: '' };
@@ -10,6 +14,226 @@ function splitThinking(text) {
   let thinking = '';
   const answer = text.replace(re, (_, g1) => { thinking += (thinking ? '\n\n' : '') + g1.trim(); return ''; }).trim();
   return { thinking, answer };
+}
+
+// 需求分析问题的类型/严重程度中文标签与颜色
+const TYPE_CONFIG = {
+  conflict: { label: '矛盾冲突', color: '#e74c3c', bg: 'rgba(231,76,60,0.12)' },
+  omission: { label: '遗漏缺失', color: '#e67e22', bg: 'rgba(230,126,34,0.12)' },
+  logic_flaw: { label: '逻辑漏洞', color: '#c0392b', bg: 'rgba(192,57,43,0.12)' },
+  risk: { label: '风险识别', color: '#e74c3c', bg: 'rgba(231,76,60,0.12)' },
+  ambiguity: { label: '歧义模糊', color: '#8e44ad', bg: 'rgba(142,68,173,0.12)' },
+  suggestion: { label: '建议改进', color: '#2980b9', bg: 'rgba(41,128,185,0.12)' },
+};
+const SEV_CONFIG = {
+  high: { label: '高', color: '#e74c3c', bg: 'rgba(231,76,60,0.18)' },
+  medium: { label: '中', color: '#e67e22', bg: 'rgba(230,126,34,0.18)' },
+  low: { label: '低', color: '#2980b9', bg: 'rgba(41,128,185,0.18)' },
+};
+
+function ReqAnalysisCard({ data, onDownloadPDF }) {
+  const { summary, statistics, issues } = data || {};
+  const stats = statistics || {};
+  const issueList = issues || [];
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      await onDownloadPDF();
+    } catch (e) {
+      alert('PDF 下载失败：' + (e.message || e));
+    }
+    setDownloading(false);
+  }
+
+  return (
+    <div style={{ fontFamily: '"Space Grotesk", "Manrope", sans-serif' }}>
+      {/* 头部 */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 16, paddingBottom: 12,
+        borderBottom: '1px solid #211f24',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="mi" style={{ fontSize: 22, color: '#cfbcff' }}>assignment</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#e6e0e9' }}>需求分析报告</span>
+        </div>
+        <button
+          className="primary"
+          onClick={handleDownload}
+          disabled={downloading}
+          style={{ fontSize: 12, padding: '6px 14px' }}
+        >
+          <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>
+            {downloading ? 'hourglass_top' : 'download'}
+          </span>
+          {downloading ? '生成中…' : '下载 PDF'}
+        </button>
+      </div>
+
+      {/* 统计卡片 */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20,
+      }}>
+        {['high', 'medium', 'low'].map(sev => {
+          const cfg = SEV_CONFIG[sev];
+          return (
+            <div key={sev} style={{
+              background: cfg.bg, borderRadius: 12, padding: '14px 12px',
+              textAlign: 'center', border: `1px solid ${cfg.color}22`,
+            }}>
+              <div style={{ fontSize: 26, fontWeight: 700, color: cfg.color }}>
+                {stats[sev] || 0}
+              </div>
+              <div style={{ fontSize: 11, color: cfg.color, marginTop: 2 }}>
+                {sev === 'high' ? '高风险' : sev === 'medium' ? '中风险' : '低风险'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 总体评价 */}
+      {summary && (
+        <div style={{
+          background: 'rgba(207,188,255,0.06)', borderRadius: 12,
+          padding: 14, marginBottom: 20, border: '1px solid #211f24',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#cfbcff', marginBottom: 6 }}>
+            总体评价
+          </div>
+          <div style={{ fontSize: 13, color: '#b5afbd', lineHeight: 1.7 }}>{summary}</div>
+        </div>
+      )}
+
+      {/* 问题列表 */}
+      {issueList.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 13, fontWeight: 600, color: '#948e9c', marginBottom: 12,
+          }}>
+            发现 {issueList.length} 个问题
+          </div>
+          {issueList.map((issue, i) => {
+            const tcfg = TYPE_CONFIG[issue.type] || TYPE_CONFIG.suggestion;
+            const scfg = SEV_CONFIG[issue.severity] || SEV_CONFIG.low;
+            return (
+              <div key={issue.id || i} style={{
+                background: '#1b1920', borderRadius: 12, padding: 16,
+                marginBottom: 10, border: '1px solid #211f24',
+                borderLeft: `3px solid ${scfg.color}`,
+              }}>
+                {/* 标题行 */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
+                  flexWrap: 'wrap',
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, color: '#494551',
+                    fontFamily: '"Space Grotesk", monospace',
+                  }}>
+                    {issue.id || `ISS-${String(i + 1).padStart(3, '0')}`}
+                  </span>
+                  <span style={{
+                    fontSize: 10, padding: '1px 8px', borderRadius: 4,
+                    background: tcfg.bg, color: tcfg.color, fontWeight: 600,
+                  }}>
+                    {tcfg.label}
+                  </span>
+                  <span style={{
+                    fontSize: 10, padding: '1px 8px', borderRadius: 4,
+                    background: scfg.bg, color: scfg.color, fontWeight: 600,
+                  }}>
+                    {scfg.label}风险
+                  </span>
+                </div>
+                {/* 标题 */}
+                <div style={{
+                  fontSize: 14, fontWeight: 700, color: scfg.color, marginBottom: 8,
+                }}>
+                  {issue.title || '（无标题）'}
+                </div>
+                {/* 详情 */}
+                {issue.description && (
+                  <InfoRow icon="subject" label="问题描述" text={issue.description} />
+                )}
+                {issue.location && (
+                  <InfoRow icon="location_on" label="所在位置" text={issue.location} color="#948e9c" />
+                )}
+                {issue.impact && (
+                  <InfoRow icon="warning" label="影响分析" text={issue.impact} color="#e7c365" />
+                )}
+                {issue.suggestion && (
+                  <InfoRow icon="lightbulb" label="改进建议" text={issue.suggestion} color="#7fd9a8" italic />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 无问题 */}
+      {issueList.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 20, color: '#948e9c', fontSize: 13 }}>
+          未发现明显问题，文档质量良好。
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoRow({ icon, label, text, color = '#b5afbd', italic = false }) {
+  return (
+    <div style={{ marginBottom: 6, display: 'flex', gap: 6 }}>
+      <span className="mi" style={{
+        fontSize: 13, color: '#494551', marginTop: 1, flexShrink: 0,
+      }}>{icon}</span>
+      <div>
+        <span style={{ fontSize: 10, color: '#494551', fontWeight: 600 }}>{label}</span>
+        <div style={{
+          fontSize: 12, color, lineHeight: 1.6, marginTop: 1,
+          fontStyle: italic ? 'italic' : 'normal',
+        }}>
+          {text}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactActions({ project, artifact }) {
+  if (!project || !artifact?.kind) return null;
+
+  async function download() {
+    try {
+      if (artifact.kind === 'testcase') {
+        await api.exportOutputExcel(project, 'testcase', artifact.filename);
+      } else if (artifact.kind === 'xmind') {
+        await api.downloadOutput(project, 'xmind', artifact.filename);
+      } else if (artifact.kind === 'req_analysis') {
+        await api.downloadOutput(project, 'req_analysis', artifact.pdfFilename || artifact.filename);
+      }
+    } catch (e) {
+      alert('下载失败：' + (e.message || e));
+    }
+  }
+
+  const label = artifact.kind === 'testcase'
+    ? '下载 Excel'
+    : artifact.kind === 'xmind'
+      ? '下载 Markdown'
+      : '下载 PDF';
+  const icon = artifact.kind === 'testcase' ? 'grid_on' : artifact.kind === 'xmind' ? 'description' : 'picture_as_pdf';
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button className="ghost" onClick={download} style={{ padding: '6px 12px', fontSize: 12 }}>
+        <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>{icon}</span>
+        {label}
+      </button>
+    </div>
+  );
 }
 
 function smartTitle(userText, aiText = '') {
@@ -52,31 +276,118 @@ function CitationBlock({ sources }) {
   );
 }
 
-function ThinkingBlock({ text }) {
+function ThinkingBlock({ text, elapsedMs, streaming }) {
   const [open, setOpen] = useState(false);
-  if (!text) return null;
+  if (!text && !streaming) return null;
+
+  const steps = text
+    ? text.split(/\n(?=\d+[\.\、\)])/g)
+        .filter(s => s.trim())
+        .map(s => s.trim())
+    : [];
+
+  const elapsed = elapsedMs
+    ? `${(elapsedMs / 1000).toFixed(1)}s`
+    : null;
+
   return (
-    <div className="thinking">
-      <button className="ghost" onClick={() => setOpen(v => !v)} style={{ padding: '4px 10px', fontSize: 12 }}>
-        <span className="mi" style={{ fontSize: 13, verticalAlign: -2, marginRight: 4, color: '#e7c365' }}>bolt</span>
-        深度思考过程
-      </button>
-      {open && <pre className="thinking-body">{text}</pre>}
-    </div>
+    <details
+      className="thinking-details"
+      open={open || streaming}
+      onToggle={(e) => setOpen(e.target.open)}
+    >
+      <summary className="thinking-summary">
+        <span className="mi thinking-chevron">chevron_right</span>
+        {streaming && <span className="thinking-pulse" />}
+        {!streaming && <span className="thinking-dot" />}
+        <span className="thinking-label">深度思考过程</span>
+        {elapsed && <span className="thinking-time">已耗时 {elapsed}</span>}
+        {streaming && !elapsed && <span className="thinking-time">进行中…</span>}
+      </summary>
+      <div className="thinking-body-v2">
+        {steps.length <= 1
+          ? <p>{text || '正在思考…'}</p>
+          : steps.map((s, i) => <p key={i}>{s}</p>)
+        }
+      </div>
+    </details>
   );
 }
 
-function groupChats(chats) {
-  const now = Date.now();
-  const DAY = 24 * 3600 * 1000;
-  const today = [], week = [], older = [];
+const CHAT_MODE_GROUPS = [
+  { key: 'qa', label: '问答' },
+  { key: 'chat', label: '普通问答' },
+  { key: 'testcase', label: '生成测试用例' },
+  { key: 'xmind', label: '生成 XMind' },
+  { key: 'req_analysis', label: '需求分析' },
+  { key: 'augment', label: '信息补充' },
+];
+
+const CHAT_MODE_KEYS = new Set(CHAT_MODE_GROUPS.map(g => g.key));
+
+function normalizeChatMode(mode) {
+  return CHAT_MODE_KEYS.has(mode) ? mode : 'qa';
+}
+
+function modeLabel(mode) {
+  return CHAT_MODE_GROUPS.find(g => g.key === normalizeChatMode(mode))?.label || '问答';
+}
+
+function groupChatsByMode(chats) {
+  const groups = Object.fromEntries(CHAT_MODE_GROUPS.map(g => [g.key, []]));
   chats.forEach(c => {
-    const age = now - (c.updatedAt || 0);
-    if (age < DAY) today.push(c);
-    else if (age < 7 * DAY) week.push(c);
-    else older.push(c);
+    groups[normalizeChatMode(c.mode)].push({ ...c, mode: normalizeChatMode(c.mode) });
   });
-  return { today, week, older };
+  return CHAT_MODE_GROUPS
+    .map(g => ({
+      ...g,
+      items: groups[g.key].sort(
+        (a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+      ),
+    }));
+}
+
+function filenameFromPath(path) {
+  if (!path) return '';
+  return String(path).split(/[\\/]/).pop();
+}
+
+function artifactFromResult(result) {
+  if (!result?.mode) return null;
+  if (result.mode === 'testcase') {
+    const filename = filenameFromPath(result.output_file) || result.output_filename;
+    return filename ? { kind: 'testcase', filename, outputFile: result.output_file } : null;
+  }
+  if (result.mode === 'xmind') {
+    const filename = filenameFromPath(result.output_file) || result.output_filename;
+    return filename ? { kind: 'xmind', filename, outputFile: result.output_file } : null;
+  }
+  if (result.mode === 'req_analysis') {
+    const pdfFilename = result.pdf_filename || filenameFromPath(result.pdf_file);
+    return pdfFilename ? {
+      kind: 'req_analysis',
+      filename: pdfFilename,
+      pdfFilename,
+      outputFile: result.output_file,
+      pdfFile: result.pdf_file,
+    } : null;
+  }
+  return null;
+}
+
+function buildChatHistory(messages = []) {
+  return messages
+    .filter(m => ['user', 'assistant'].includes(m.role))
+    .filter(m => !m._streaming)
+    .map(m => {
+      let content = String(m.content || '').trim();
+      if (content.startsWith('__REQ_ANALYSIS__')) {
+        content = '[需求分析结果已生成]';
+      }
+      return { role: m.role, content };
+    })
+    .filter(m => m.content)
+    .slice(-12);
 }
 
 export default function Chat() {
@@ -86,9 +397,18 @@ export default function Chat() {
   const [, setLast] = useLast(project);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selectedMode, setSelectedMode] = useState('qa');
+  const streamCtrlRef = useRef(null);
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const [error, setError] = useState(null);
+  const [lastAnalysis, setLastAnalysis] = useState(null);  // 最近一次需求分析数据
+
+  // 图片上传相关状态
+  const [selectedImages, setSelectedImages] = useState([]); // [{id, file, previewUrl}]
+  const [viewerImage, setViewerImage] = useState(null);     // {urls: [], index: 0} | null
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef(null);
 
   // @-mention multitiling data: legacy cases + legacy xmind + requirement docs + output items
   const [legacyCases, setLegacyCases] = useState([]);
@@ -280,34 +600,76 @@ export default function Chat() {
     },
     [chats, activeId],
   );
-  const mode = active?.mode || 'qa';
+  const mode = normalizeChatMode(active?.mode || selectedMode);
 
   useEffect(() => {
     if (project && chats.length === 0) {
       const c = newChat('qa');
       chatsApi.save([c]);
       chatsApi.setActive(c.id);
+      setSelectedMode('qa');
     } else if (project && !active && chats.length > 0) {
-      chatsApi.setActive(chats[0].id);
+      const existing = [...chats]
+        .filter(c => normalizeChatMode(c.mode) === selectedMode)
+        .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+      const next = existing[0] || [...chats].sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)))[0];
+      if (next) {
+        setSelectedMode(normalizeChatMode(next.mode));
+        chatsApi.setActive(next.id);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, chats.length]);
+  }, [project, chats.length, activeId]);
+
+  useEffect(() => {
+    if (active) setSelectedMode(normalizeChatMode(active.mode));
+  }, [active?.id, active?.mode]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [active?.messages?.length, busy]);
 
+  // 流式模式下内容持续更新，需要更频繁的自动滚动
+  useEffect(() => {
+    if (!busy) return;
+    const lastMsg = active?.messages?.[active.messages.length - 1];
+    if (!lastMsg?._streaming) return;
+    const timer = setInterval(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  }, [busy, active?.messages]);
+
   function createNew() {
-    const c = newChat(mode);
+    const c = newChat(selectedMode);
     chatsApi.save([c, ...chats]);
     chatsApi.setActive(c.id);
   }
 
   function removeChat(id) {
     if (!confirm('删除此对话？')) return;
+    const target = chats.find(c => c.id === id);
+    const targetMode = normalizeChatMode(target?.mode || selectedMode);
     const next = chats.filter(c => c.id !== id);
-    chatsApi.save(next);
-    if (id === activeId) chatsApi.setActive(next[0]?.id || '');
+    if (id === activeId) {
+      const sameMode = [...next]
+        .filter(c => normalizeChatMode(c.mode) === targetMode)
+        .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+      if (sameMode.length > 0) {
+        chatsApi.save(next);
+        setSelectedMode(targetMode);
+        chatsApi.setActive(sameMode[0].id);
+      } else {
+        const c = newChat(targetMode);
+        chatsApi.save([c, ...next]);
+        setSelectedMode(targetMode);
+        chatsApi.setActive(c.id);
+      }
+    } else {
+      chatsApi.save(next);
+    }
   }
 
   function renameChat(id) {
@@ -318,30 +680,174 @@ export default function Chat() {
     chatsApi.save(chats.map(c => c.id === id ? { ...c, title: name.trim() || c.title } : c));
   }
 
-  function setMode(m) {
-    if (active && active.messages.length === 0 && active.mode === m) return;
+  function selectMode(m) {
+    const nextMode = normalizeChatMode(m);
+    setSelectedMode(nextMode);
+    if (active && active.messages.length === 0 && normalizeChatMode(active.mode) === nextMode) return;
     const existing = chats
-      .filter(c => c.mode === m)
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      .filter(c => normalizeChatMode(c.mode) === nextMode)
+      .sort((a, b) => ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
     if (existing.length > 0) {
       chatsApi.setActive(existing[0].id);
     } else {
-      const c = newChat(m);
+      const c = newChat(nextMode);
       chatsApi.save([c, ...chats]);
       chatsApi.setActive(c.id);
     }
   }
 
+  // ---- image handlers ----
+  function validateAndAddFiles(files) {
+    const valid = [];
+    for (const f of files) {
+      const ext = '.' + (f.name || '').split('.').pop()?.toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        alert(`不支持的图片格式: ${ext}。允许: PNG, JPG, JPEG, GIF, WebP`);
+        continue;
+      }
+      if (f.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+        alert(`图片 ${f.name} 大小 ${(f.size / 1024 / 1024).toFixed(1)} MB 超过 ${MAX_IMAGE_SIZE_MB} MB 限制`);
+        continue;
+      }
+      const previewUrl = URL.createObjectURL(f);
+      valid.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        file: f,
+        previewUrl,
+      });
+    }
+    if (valid.length > 0) {
+      setSelectedImages(prev => [...prev, ...valid]);
+    }
+  }
+
+  function handleFileSelect(e) {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      validateAndAddFiles(Array.from(files));
+    }
+    // reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function removeImage(id) {
+    setSelectedImages(prev => {
+      const item = prev.find(p => p.id === id);
+      if (item) URL.revokeObjectURL(item.previewUrl);
+      return prev.filter(p => p.id !== id);
+    });
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set false if leaving the container itself (not a child)
+    if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragOver(false);
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const dt = e.dataTransfer;
+    if (dt && dt.files && dt.files.length > 0) {
+      validateAndAddFiles(Array.from(dt.files).filter(f => f.type.startsWith('image/')));
+    }
+  }
+
+  function handlePaste(e) {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+    const imageFiles = [];
+    for (const item of items) {
+      if (item.type && item.type.startsWith('image/')) {
+        const blob = item.getAsFile();
+        if (blob) {
+          // 生成一个合理的文件名
+          const ext = item.type.split('/')[1] || 'png';
+          const renamed = new File([blob], `clipboard_${Date.now()}.${ext}`, { type: item.type });
+          imageFiles.push(renamed);
+        }
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault(); // 阻止默认粘贴行为（避免粘贴图片的 base64）
+      validateAndAddFiles(imageFiles);
+    }
+  }
+
+  function openViewer(urls, index) {
+    setViewerImage({ urls, index });
+  }
+
+  function closeViewer() {
+    setViewerImage(null);
+  }
+
+  function viewerPrev() {
+    setViewerImage(prev => {
+      if (!prev) return prev;
+      return { ...prev, index: (prev.index - 1 + prev.urls.length) % prev.urls.length };
+    });
+  }
+
+  function viewerNext() {
+    setViewerImage(prev => {
+      if (!prev) return prev;
+      return { ...prev, index: (prev.index + 1) % prev.urls.length };
+    });
+  }
+
+  // ---- keyboard handler for viewer ----
+  useEffect(() => {
+    if (!viewerImage) return;
+    function onKey(e) {
+      if (e.key === 'Escape') closeViewer();
+      if (e.key === 'ArrowLeft') viewerPrev();
+      if (e.key === 'ArrowRight') viewerNext();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerImage]);
+
   async function send() {
     if (!project) { alert('请先选择项目'); return; }
     if (!active) { createNew(); return; }
-    if (!input.trim()) return;
+    if (!input.trim() && selectedImages.length === 0) return;
     if (!llm.api_key) { alert('请先在「设置」填写 API Key'); return; }
     const q = input.trim();
+    const imgs = [...selectedImages];
     setInput('');
+    setSelectedImages([]);
 
-    const history = active.messages.map(m => ({ role: m.role, content: m.content }));
-    const msgUser = { role: 'user', content: q };
+    // 上传图片
+    let imageUrls = [];
+    if (imgs.length > 0) {
+      try {
+        const files = imgs.map(img => img.file);
+        const uploadResult = await api.uploadImages(project, files);
+        imageUrls = (uploadResult.images || []).map(r => r.url);
+      } catch (e) {
+        alert('图片上传失败：' + (e.message || e));
+        // 恢复图片到预览列表
+        setSelectedImages(imgs);
+        return;
+      }
+      // 清理预览 URL
+      imgs.forEach(img => URL.revokeObjectURL(img.previewUrl));
+    }
+
+    const content = q || (imageUrls.length > 0 ? '[图片]' : '');
+    const history = buildChatHistory(active.messages);
+    const msgUser = { role: 'user', content, images: imageUrls.length > 0 ? imageUrls : undefined };
     const isFirstMsg = active.messages.length === 0;
 
     // 1) persist user message immediately, then work off the snapshot
@@ -354,39 +860,159 @@ export default function Chat() {
     }) : c);
     chatsApi.save(chatsAfterUser);
     setBusy(true);
+    const sendStart = performance.now();
 
     const mentions = extractMentions(q);
+    const useStream = getStreamOutput();
+
+    // 辅助函数：原地更新最后一条 AI 消息
+    const updateLastMsg = (updater) => {
+      const currentChats = JSON.parse(
+        localStorage.getItem(`casemind.chats.${project}`) || '[]'
+      );
+      const updated = currentChats.map(c => {
+        if (c.id !== active.id) return c;
+        const msgs = [...c.messages];
+        msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], ...updater };
+        return { ...c, messages: msgs, updatedAt: Date.now() };
+      });
+      localStorage.setItem(`casemind.chats.${project}`, JSON.stringify(updated));
+      window.dispatchEvent(new Event('casemind:chats'));
+    };
+
+    // augment 模式不走流式
+    if (mode === 'augment') {
+      let msgAI;
+      try {
+        let displayText;
+        if (imageUrls.length > 0) {
+          displayText = '信息补充模式暂不支持图片分析，图片已保存但未用于记忆融合。';
+        } else {
+          const r = await api.augmentMemory(project, q, llm, '');
+          displayText =
+            `已将补充信息融合进系统记忆。\n` +
+            `• 字符数：${r.info_chars}\n` +
+            `• memory.md：${r.memory_md_path}\n\n` +
+            `可在「记忆面板」查看合并后的索引。`;
+        }
+        msgAI = { role: 'assistant', content: displayText };
+      } catch (e) {
+        msgAI = { role: 'assistant', content: '错误：' + (e.message || e) };
+      }
+      const chatsAfterAI = chatsAfterUser.map(c => c.id === active.id ? ({
+        ...c, messages: [...c.messages, msgAI], updatedAt: Date.now(),
+      }) : c);
+      chatsApi.save(chatsAfterAI);
+      setBusy(false);
+      return;
+    }
+
+    // 流式模式
+    if (useStream) {
+      // 插入占位 AI 消息
+      const placeholderMsg = {
+        role: 'assistant', content: '', thinking: '',
+        sources: [], elapsedMs: 0, _streaming: true,
+      };
+      let chatsWithPlaceholder = chatsAfterUser.map(c => c.id === active.id ? ({
+        ...c, messages: [...c.messages, placeholderMsg], updatedAt: Date.now(),
+      }) : c);
+      chatsApi.save(chatsWithPlaceholder);
+
+      let streamThinking = '';
+      let streamAnswer = '';
+
+      const controller = api.queryStream(
+        project, q, mode, llm, null, history, mentions,
+        imageUrls.length > 0 ? imageUrls : null,
+        {
+          onThinking(text) {
+            streamThinking += text;
+            updateLastMsg({ content: streamAnswer, thinking: streamThinking, _streaming: true });
+          },
+          onAnswer(text) {
+            streamAnswer += text;
+            updateLastMsg({ content: streamAnswer, thinking: streamThinking, _streaming: true });
+          },
+          onDone(result) {
+            const elapsedMs = Math.round(performance.now() - sendStart);
+            const artifact = artifactFromResult(result);
+            const finalContent = mode === 'req_analysis' && result?.data
+              ? `__REQ_ANALYSIS__${JSON.stringify(result.data)}`
+              : (streamAnswer || result?.answer || '');
+            updateLastMsg({
+              content: finalContent,
+              thinking: streamThinking,
+              sources: result?.sources || [],
+              artifact,
+              elapsedMs,
+              _streaming: false,
+            });
+
+            // 更新侧边栏最近结果
+            if (mode === 'req_analysis' && result?.data) {
+              setLast({ kind: 'req_analysis', payload: result, savedAt: Date.now() });
+              setLastAnalysis(result.data);
+            } else if (mode === 'testcase' && result?.data) {
+              setLast({ kind: 'testcase', payload: result, savedAt: Date.now() });
+            } else if (mode === 'xmind' && result?.output_file) {
+              setLast({ kind: 'xmind', payload: result, savedAt: Date.now() });
+            }
+
+            setBusy(false);
+            streamCtrlRef.current = null;
+          },
+          onError(err) {
+            updateLastMsg({
+              content: '错误：' + (err.message || String(err)),
+              thinking: streamThinking, _streaming: false,
+            });
+            setBusy(false);
+            streamCtrlRef.current = null;
+          },
+        }
+      );
+      streamCtrlRef.current = controller;
+      return;
+    }
+
+    // 非流式模式
     let msgAI;
     try {
-      let r, displayText = '', thinking = '', sources = [];
-      if (mode === 'augment') {
-        r = await api.augmentMemory(project, q, llm, '');
-        displayText =
-          `已将补充信息融合进系统记忆。\n` +
-          `• 字符数：${r.info_chars}\n` +
-          `• memory.md：${r.memory_md_path}\n\n` +
-          `可在「记忆面板」查看合并后的索引。`;
+      let r, displayText = '', thinking = '', sources = [], artifact = null;
+      if (mode === 'req_analysis') {
+        r = await api.query(project, q, mode, llm, null, history, mentions, imageUrls.length > 0 ? imageUrls : null);
+        const analysisData = r.data || {};
+        setLastAnalysis(analysisData);
+        displayText = `__REQ_ANALYSIS__${JSON.stringify(analysisData)}`;
+        artifact = artifactFromResult(r);
+        setLast({ kind: 'req_analysis', payload: r, savedAt: Date.now() });
       } else {
-        r = await api.query(project, q, mode, llm, null, history, mentions);
+        r = await api.query(project, q, mode, llm, null, history, mentions, imageUrls.length > 0 ? imageUrls : null);
         sources = r.sources || [];
+        artifact = artifactFromResult(r);
+        // 所有模式统一解析 thinking 标签
+        const sp = splitThinking(r.answer || '');
+        thinking = sp.thinking;
+        const answerBody = sp.answer;
+
         if (r.mode === 'qa' || r.mode === 'chat') {
-          const sp = splitThinking(r.answer || '');
-          thinking = sp.thinking;
-          displayText = sp.answer;
+          displayText = answerBody;
         } else if (r.mode === 'testcase') {
-          displayText = `已生成 ${r.data?.cases?.length || 0} 条测试用例。\n保存：${r.output_file}\n可在「AI 用例库」查看。`;
+          displayText = answerBody || `已生成 ${r.data?.cases?.length || 0} 条测试用例。\n保存：${r.output_file}\n可在「AI 用例库」查看。`;
           setLast({ kind: 'testcase', payload: r, savedAt: Date.now() });
         } else if (r.mode === 'xmind') {
-          displayText = `已生成 XMind。\n保存：${r.output_file}\n可在「AI 用例库」查看。`;
+          displayText = answerBody || `已生成 XMind。\n保存：${r.output_file}\n可在「AI 用例库」查看。`;
           setLast({ kind: 'xmind', payload: r, savedAt: Date.now() });
         }
       }
-      msgAI = { role: 'assistant', content: displayText, sources, thinking };
+      const elapsedMs = Math.round(performance.now() - sendStart);
+      msgAI = { role: 'assistant', content: displayText, sources, thinking, artifact, elapsedMs };
     } catch (e) {
       msgAI = { role: 'assistant', content: '错误：' + (e.message || e) };
     }
 
-    // 2) append AI message onto the *post-user* snapshot, not the stale closure
+    // append AI message onto the *post-user* snapshot, not the stale closure
     const chatsAfterAI = chatsAfterUser.map(c => c.id === active.id ? ({
       ...c,
       messages: [...c.messages, msgAI],
@@ -398,40 +1024,72 @@ export default function Chat() {
     setBusy(false);
   }
 
-  const { today, week, older } = groupChats(chats);
+  async function handleDownloadPDF(artifact = null, analysisData = null) {
+    if (artifact?.pdfFilename || (artifact?.kind === 'req_analysis' && artifact?.filename)) {
+      await api.downloadOutput(project, 'req_analysis', artifact.pdfFilename || artifact.filename);
+      return;
+    }
+    const data = analysisData || lastAnalysis;
+    if (!data || !project) {
+      alert('暂无分析数据');
+      return;
+    }
+    const result = await api.generateReqAnalysisReport(project, data);
+    if (result.pdf_base64) {
+      // 将 base64 转为 Blob 并触发下载
+      const byteChars = atob(result.pdf_base64);
+      const byteNums = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNums[i] = byteChars.charCodeAt(i);
+      }
+      const byteArr = new Uint8Array(byteNums);
+      const blob = new Blob([byteArr], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || `需求分析报告_${project}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }
 
-  const renderGroup = (label, items) => items.length > 0 && (
-    <>
-      <div className="chat-group-label">{label}</div>
-      {items.map(c => (
-        <div
-          key={c.id}
-          className={`chat-item ${c.id === activeId ? 'active' : ''}`}
-          onClick={() => chatsApi.setActive(c.id)}
-        >
-          <div className="chat-item-title">{c.title || '新对话'}</div>
-          <div className="chat-item-meta">
-            {c.mode === 'qa' ? '问答'
-              : c.mode === 'chat' ? '普通问答'
-              : c.mode === 'testcase' ? '生成测试用例'
-              : c.mode === 'xmind' ? '生成 XMind'
-              : c.mode === 'augment' ? '信息补充'
-              : c.mode}
-            <span className="muted"> · {c.messages.length} 条</span>
-          </div>
-          <div className="chat-item-actions">
-            <button className="icon-btn" onClick={(e) => { e.stopPropagation(); renameChat(c.id); }} title="重命名">
-              <span className="mi" style={{ fontSize: 14 }}>edit</span>
-            </button>
-            <button className="icon-btn" onClick={(e) => { e.stopPropagation(); removeChat(c.id); }} title="删除">
-              <span className="mi" style={{ fontSize: 14 }}>close</span>
-            </button>
-          </div>
-        </div>
-      ))}
-    </>
+  const chatGroups = groupChatsByMode(chats);
+  const selectedGroup = chatGroups.find(g => g.key === selectedMode) || chatGroups[0];
+  const modeIcons = {
+    qa: 'help',
+    chat: 'chat',
+    testcase: 'fact_check',
+    xmind: 'account_tree',
+    req_analysis: 'assignment',
+    augment: 'add_notes',
+  };
+
+  const renderChatItem = (c) => (
+    <div
+      key={c.id}
+      className={`chat-item ${c.id === activeId ? 'active' : ''}`}
+      onClick={() => {
+        setSelectedMode(normalizeChatMode(c.mode));
+        chatsApi.setActive(c.id);
+      }}
+    >
+      <div className="chat-item-title">{c.title || '新对话'}</div>
+      <div className="chat-item-meta">
+        {modeLabel(c.mode)}
+        <span className="muted"> · {c.messages.length} 条</span>
+      </div>
+      <div className="chat-item-actions">
+        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); renameChat(c.id); }} title="重命名">
+          <span className="mi" style={{ fontSize: 14 }}>edit</span>
+        </button>
+        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); removeChat(c.id); }} title="删除">
+          <span className="mi" style={{ fontSize: 14 }}>close</span>
+        </button>
+      </div>
+    </div>
   );
-
   return (
     <div className="chat-layout">
       {error && (
@@ -444,16 +1102,37 @@ export default function Chat() {
         </div>
       )}
       <aside className="chat-list">
-        <div className="chat-list-title">
-          <span>会话记录</span>
-          <button className="icon-btn" onClick={createNew} title="新对话">
-            <span className="mi">edit_square</span>
-          </button>
+        <div className="chat-mode-rail">
+          {chatGroups.map(g => (
+            <button
+              key={g.key}
+              className={`chat-mode-item ${selectedMode === g.key ? 'active' : ''}`}
+              onClick={() => selectMode(g.key)}
+              title={g.label}
+            >
+              <span className="mi">{modeIcons[g.key]}</span>
+              <span className="chat-mode-label">{g.label}</span>
+              <span className="chat-mode-count">{g.items.length}</span>
+            </button>
+          ))}
         </div>
-        {chats.length === 0 && <p className="muted">还没有对话</p>}
-        {renderGroup('今天', today)}
-        {renderGroup('本周', week)}
-        {renderGroup('更早', older)}
+        <div className="chat-session-pane">
+          <div className="chat-list-title">
+            <span>{selectedGroup?.label || '问答'}</span>
+            <button className="icon-btn" onClick={createNew} title="新对话">
+              <span className="mi">edit_square</span>
+            </button>
+          </div>
+          {selectedGroup?.items.length === 0 ? (
+            <div className="chat-empty-state">
+              <span className="mi">forum</span>
+              <p>暂无会话</p>
+              <button className="ghost" onClick={createNew}>新建对话</button>
+            </div>
+          ) : (
+            selectedGroup.items.map(renderChatItem)
+          )}
+        </div>
       </aside>
 
       <div>
@@ -464,13 +1143,6 @@ export default function Chat() {
               <span className="badge-pro" style={{ marginLeft: 8 }}>{project || '未选择项目'}</span>
             </div>
             <div className="page-sub">自动附带当前项目记忆 + 向量检索 + 本会话历史。</div>
-          </div>
-          <div className="mode-tabs">
-            <button className={mode === 'qa' ? 'active' : ''} onClick={() => setMode('qa')}>问答</button>
-            <button className={mode === 'chat' ? 'active' : ''} onClick={() => setMode('chat')}>普通问答</button>
-            <button className={mode === 'testcase' ? 'active' : ''} onClick={() => setMode('testcase')}>生成测试用例</button>
-            <button className={mode === 'xmind' ? 'active' : ''} onClick={() => setMode('xmind')}>生成 XMind</button>
-            <button className={mode === 'augment' ? 'active' : ''} onClick={() => setMode('augment')}>信息补充</button>
           </div>
         </div>
 
@@ -488,30 +1160,97 @@ export default function Chat() {
               输入你的问题，例如：&quot;登录模块有哪些测试用例？&quot;
             </p>
           )}
-          {active?.messages.map((m, i) => (
+          {active?.messages.map((m, i) => {
+            const isReqAnalysis = typeof m.content === 'string' && m.content.startsWith('__REQ_ANALYSIS__');
+            let analysisData = null;
+            let displayContent = m.content;
+            if (isReqAnalysis) {
+              try {
+                analysisData = JSON.parse(m.content.slice('__REQ_ANALYSIS__'.length));
+                displayContent = '';
+              } catch {}
+            }
+            const hasImages = m.images && m.images.length > 0;
+            return (
             <div key={i} className={`bubble ${m.role === 'assistant' ? 'ai' : 'user'}`}>
-              {m.role === 'assistant' && <ThinkingBlock text={m.thinking} />}
-              <div>{m.content}</div>
+              {m.role === 'assistant' && <ThinkingBlock text={m.thinking} elapsedMs={m.elapsedMs} streaming={m._streaming} />}
+              {/* 用户消息中的图片 */}
+              {hasImages && (
+                <div className="message-images">
+                  {m.images.map((url, idx) => (
+                    <div
+                      key={idx}
+                      className="message-image-card"
+                      onClick={() => openViewer(m.images, idx)}
+                      title="点击查看大图"
+                    >
+                      <img src={url} alt={`图片 ${idx + 1}`} loading="lazy" />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {isReqAnalysis && analysisData ? (
+                <ReqAnalysisCard data={analysisData} onDownloadPDF={() => handleDownloadPDF(m.artifact, analysisData)} />
+              ) : (
+                <div>{displayContent}</div>
+              )}
+              {!isReqAnalysis && <ArtifactActions project={project} artifact={m.artifact} />}
               {m.role === 'assistant' && <CitationBlock sources={m.sources} />}
             </div>
-          ))}
-          {busy && (
+            );
+          })}
+          {busy && !active?.messages?.[active.messages.length - 1]?._streaming && (
             <div className="bubble ai" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span className="mi" style={{ color: '#cfbcff', animation: 'pulse 1.4s infinite' }}>auto_awesome</span>
-              <span className="muted">{mode === 'chat' ? '正在生成回答…' : '正在检索并生成回答…'}</span>
+              <span className="muted">{mode === 'req_analysis' ? '正在分析需求文档…' : mode === 'chat' ? '正在生成回答…' : '正在检索并生成回答…'}</span>
             </div>
           )}
         </div>
 
-        <div className="card" style={{ marginTop: 16, position: 'relative' }}>
+        <div
+          className={`card image-upload-area ${isDragOver ? 'drag-over' : ''}`}
+          style={{ marginTop: 16, position: 'relative' }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* 隐藏的文件选择 input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.gif,.webp"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileSelect}
+          />
+          {/* 图片预览列表 */}
+          {selectedImages.length > 0 && (
+            <div className="image-preview-list">
+              {selectedImages.map((img) => (
+                <div key={img.id} className="image-preview-item">
+                  <img src={img.previewUrl} alt={img.file.name} />
+                  <button
+                    className="remove-btn"
+                    onClick={() => removeImage(img.id)}
+                    title="移除此图片"
+                  >
+                    <span className="mi" style={{ fontSize: 14 }}>close</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={input}
             onChange={handleInputChange}
             onSelect={handleInputChange}
+            onPaste={handlePaste}
             placeholder={
               mode === 'augment'
                 ? '粘贴你希望补充进项目记忆的内容（新需求说明、业务规则、字段定义、术语澄清、决策记录…），Enter 发送。系统会把它融入 memory.md 索引。'
+                : mode === 'req_analysis'
+                ? '粘贴或输入需求文档内容（PRD、需求规格说明等），AI 将自动分析其中的矛盾、遗漏、逻辑漏洞和风险。也可使用 @ 引用已上传的需求文档。'
                 : mode === 'chat'
                 ? '随便聊点什么，Enter 发送，Shift+Enter 换行。此模式不检索项目文档。'
                 : '描述你需要生成的内容，Enter 发送，Shift+Enter 换行。输入 @ 可引用文件。'
@@ -598,13 +1337,89 @@ export default function Chat() {
               <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>model_training</span>
               {llm.model || '未配置模型'}
             </span>
-            <button className="primary" onClick={send} disabled={busy}>
-              <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>send</span>
-              发送
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                className="upload-icon-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="上传图片 (支持拖拽和 Ctrl+V 粘贴)"
+                disabled={busy}
+              >
+                <span className="mi" style={{ fontSize: 20 }}>image</span>
+              </button>
+              {busy ? (
+                <button
+                  className="primary"
+                  onClick={() => {
+                    streamCtrlRef.current?.abort();
+                    streamCtrlRef.current = null;
+                    // 清除占位消息的 _streaming 状态
+                    const currentChats = JSON.parse(
+                      localStorage.getItem(`casemind.chats.${project}`) || '[]'
+                    );
+                    const updated = currentChats.map(c => {
+                      if (c.id !== active.id) return c;
+                      const msgs = [...c.messages];
+                      if (msgs.length > 0 && msgs[msgs.length - 1]._streaming) {
+                        msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], _streaming: false };
+                      }
+                      return { ...c, messages: msgs, updatedAt: Date.now() };
+                    });
+                    localStorage.setItem(`casemind.chats.${project}`, JSON.stringify(updated));
+                    window.dispatchEvent(new Event('casemind:chats'));
+                    setBusy(false);
+                  }}
+                  style={{ background: 'linear-gradient(135deg, #ffb4ab, #cf6679)' }}
+                >
+                  <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>stop</span>
+                  停止
+                </button>
+              ) : (
+                <button className="primary" onClick={send}>
+                  <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>send</span>
+                  发送
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
+      {/* 图片查看器 */}
+      {viewerImage && (
+        <div className="image-viewer-overlay" onClick={closeViewer}>
+          <button className="image-viewer-close" onClick={closeViewer} title="关闭 (Esc)">
+            <span className="mi">close</span>
+          </button>
+          {viewerImage.urls.length > 1 && (
+            <>
+              <button
+                className="image-viewer-nav prev"
+                onClick={(e) => { e.stopPropagation(); viewerPrev(); }}
+                title="上一张 (←)"
+              >
+                <span className="mi">chevron_left</span>
+              </button>
+              <button
+                className="image-viewer-nav next"
+                onClick={(e) => { e.stopPropagation(); viewerNext(); }}
+                title="下一张 (→)"
+              >
+                <span className="mi">chevron_right</span>
+              </button>
+            </>
+          )}
+          <img
+            src={viewerImage.urls[viewerImage.index]}
+            alt={`图片 ${viewerImage.index + 1}`}
+            onClick={(e) => e.stopPropagation()}
+          />
+          {viewerImage.urls.length > 1 && (
+            <div className="image-viewer-counter">
+              {viewerImage.index + 1} / {viewerImage.urls.length}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+

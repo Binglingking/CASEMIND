@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api.js';
-import { useLLMStore } from '../store.js';
+import { useLLMStore, useStreamOutput } from '../store.js';
 
 const OPENROUTER_MODELS = [
   'openai/gpt-5.5-20260423',
@@ -72,6 +72,258 @@ function detectEnvVar(s) {
   return m[1] || m[2] || m[3] || null;
 }
 
+const FEISHU_SUBFEATURES = [
+  { key: 'f1_import', label: 'F1 飞书云文档导入历史用例', desc: '从多维表格/Sheet 拉取记录，复用历史用例 ingest 流水线。' },
+  { key: 'f2_sync', label: 'F2 文档变更自动同步', desc: '订阅源文档变更，Webhook 触发增量重解析。需 drive:subscribe 权限。' },
+  { key: 'f3_done_notify', label: 'F3 解析完成 Bot 推送', desc: '用例解析/分析完成后向负责人推送摘要卡片。' },
+  { key: 'f4_error_alert', label: 'F4 异常 Warning Bot 告警', desc: '出现 error 级 warning 时自动 @负责人 告警。' },
+  { key: 'f6_review_card', label: 'F6 反哺候选 Bot 审核', desc: '新 pending 知识点推卡片，支持飞书内直接「通过/拒绝」。' },
+  { key: 'f8_export_sheet', label: 'F8 用例导出飞书电子表格', desc: '一键生成飞书 Sheet，返回分享链接。固定 9 列结构。' },
+  { key: 'f9_im_bot', label: 'F9 AI 对话接入飞书机器人', desc: '@机器人发起多模式对话（问答/用例生成/反哺审核）。需 im:message 权限。' },
+];
+
+function FeishuIntegrationCard({ globalEnabled }) {
+  const [projects, setProjects] = useState([]);
+  const [project, setProject] = useState('');
+  const [cfg, setCfg] = useState(null);
+  const [appSecretDraft, setAppSecretDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [testResult, setTestResult] = useState(null);
+
+  useEffect(() => {
+    if (!globalEnabled) return;
+    api.listProjects().then(list => {
+      const names = (list || []).map(p => p.name || p);
+      setProjects(names);
+      if (names.length && !project) setProject(names[0]);
+    }).catch(e => setErr(String(e.message || e)));
+    // eslint-disable-next-line
+  }, [globalEnabled]);
+
+  useEffect(() => {
+    if (!project) { setCfg(null); return; }
+    setErr('');
+    setTestResult(null);
+    api.feishuGetConfig(project).then(setCfg).catch(e => setErr(String(e.message || e)));
+  }, [project]);
+
+  async function save(patch) {
+    if (!project) return;
+    setSaving(true);
+    setErr('');
+    try {
+      const body = { ...patch };
+      if (appSecretDraft) {
+        body.app_secret = appSecretDraft;
+        setAppSecretDraft('');
+      }
+      const next = await api.feishuSaveConfig(project, body);
+      setCfg(next);
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
+    setSaving(false);
+  }
+
+  async function runTest() {
+    if (!project) return;
+    setTestResult(null);
+    try {
+      const r = await api.feishuTest(project);
+      setTestResult(r);
+    } catch (e) {
+      setTestResult({ token_ok: false, error: String(e.message || e) });
+    }
+  }
+
+  if (!globalEnabled) {
+    return (
+      <div className="card" style={{ margin: 0, marginBottom: 16, opacity: 0.7 }}>
+        <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="mi" style={{ color: '#7fb4ff' }}>integration_instructions</span>
+          飞书集成
+        </h3>
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+          请先在上方「实验性功能」中打开「飞书集成（总开关）」。
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ margin: 0, marginBottom: 16 }}>
+      <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="mi" style={{ color: '#7fb4ff' }}>integration_instructions</span>
+        飞书集成
+      </h3>
+      <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 4, marginBottom: 12 }}>
+        每个项目独立配置一组应用凭据；app_secret 落盘前用 Fernet 加密（若 <code className="mono">CASEMIND_MASTER_KEY</code> 未设置则降级明文存储 + 审计标记）。
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label className="muted mono" style={{ display: 'block', fontSize: 11, marginBottom: 4 }}>项目</label>
+        <select style={{ width: '100%' }} value={project} onChange={e => setProject(e.target.value)}>
+          {projects.length === 0 && <option value="">（暂无项目）</option>}
+          {projects.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+
+      {err && <div className="err" style={{ marginBottom: 8 }}>{err}</div>}
+
+      {cfg && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '10px 0', borderBottom: '1px solid #2b292f' }}>
+            <div>
+              <div style={{ fontWeight: 500 }}>项目级启用飞书集成</div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>关闭后该项目下所有飞书路由返回 403。</div>
+            </div>
+            <Toggle checked={!!cfg.enabled} onChange={(v) => save({ enabled: v })} />
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label className="muted mono" style={{ fontSize: 11 }}>App ID</label>
+            <input style={{ width: '100%' }} value={cfg.app_id || ''}
+              onChange={e => setCfg({ ...cfg, app_id: e.target.value })}
+              onBlur={() => save({ app_id: cfg.app_id || '' })}
+              placeholder="cli_xxxxxxxxxxxx" />
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label className="muted mono" style={{ fontSize: 11 }}>
+              App Secret
+              {cfg.app_secret_configured && <span className="tag ok" style={{ marginLeft: 8 }}>已配置</span>}
+              {cfg.security_warning && <span className="tag warn" style={{ marginLeft: 8 }}>{cfg.security_warning}</span>}
+            </label>
+            <input style={{ width: '100%' }} type="password" value={appSecretDraft}
+              onChange={e => setAppSecretDraft(e.target.value)}
+              placeholder={cfg.app_secret_configured ? '（已存储，留空表示不修改）' : '填入飞书 App Secret'} />
+            {appSecretDraft && (
+              <button className="ghost" style={{ marginTop: 6, fontSize: 12 }}
+                onClick={() => save({})} disabled={saving}>提交并加密落盘</button>
+            )}
+          </div>
+
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <label className="muted mono" style={{ fontSize: 11 }}>Verify Token</label>
+              <input style={{ width: '100%' }} value={cfg.verify_token || ''}
+                onChange={e => setCfg({ ...cfg, verify_token: e.target.value })}
+                onBlur={() => save({ verify_token: cfg.verify_token || '' })} />
+            </div>
+            <div>
+              <label className="muted mono" style={{ fontSize: 11 }}>Encrypt Key</label>
+              <input style={{ width: '100%' }} value={cfg.encrypt_key || ''}
+                onChange={e => setCfg({ ...cfg, encrypt_key: e.target.value })}
+                onBlur={() => save({ encrypt_key: cfg.encrypt_key || '' })} />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <label className="muted mono" style={{ fontSize: 11 }}>导出文件夹 Token</label>
+              <input style={{ width: '100%' }} value={cfg.folder_token || ''}
+                onChange={e => setCfg({ ...cfg, folder_token: e.target.value })}
+                onBlur={() => save({ folder_token: cfg.folder_token || '' })}
+                placeholder="飞书云空间 folder_token，用于 F8 落盘位置" />
+            </div>
+            <div>
+              <label className="muted mono" style={{ fontSize: 11 }}>默认群 chat_id</label>
+              <input style={{ width: '100%' }} value={cfg.default_chat_id || ''}
+                onChange={e => setCfg({ ...cfg, default_chat_id: e.target.value })}
+                onBlur={() => save({ default_chat_id: cfg.default_chat_id || '' })} />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div className="muted mono" style={{ fontSize: 11, marginBottom: 6 }}>负责人列表（用于 @ 提醒）</div>
+            {(cfg.owners || []).map((o, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <input style={{ flex: 1 }} value={o.name} placeholder="姓名"
+                  onChange={e => {
+                    const next = [...cfg.owners]; next[i] = { ...o, name: e.target.value };
+                    setCfg({ ...cfg, owners: next });
+                  }}
+                  onBlur={() => save({ owners: cfg.owners })} />
+                <input style={{ flex: 2 }} value={o.open_id} placeholder="ou_xxxxxx"
+                  onChange={e => {
+                    const next = [...cfg.owners]; next[i] = { ...o, open_id: e.target.value };
+                    setCfg({ ...cfg, owners: next });
+                  }}
+                  onBlur={() => save({ owners: cfg.owners })} />
+                <button className="ghost" onClick={() => {
+                  const next = (cfg.owners || []).filter((_, j) => j !== i);
+                  setCfg({ ...cfg, owners: next });
+                  save({ owners: next });
+                }}>删</button>
+              </div>
+            ))}
+            <button className="ghost" style={{ fontSize: 12 }} onClick={() => {
+              const next = [...(cfg.owners || []), { name: '', open_id: '' }];
+              setCfg({ ...cfg, owners: next });
+            }}>+ 添加负责人</button>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div className="muted mono" style={{ fontSize: 11, marginBottom: 6 }}>子功能开关</div>
+            {FEISHU_SUBFEATURES.map(sf => (
+              <div key={sf.key} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 0', borderBottom: '1px solid #2b292f',
+                opacity: cfg.enabled ? 1 : 0.5,
+              }}>
+                <div style={{ paddingRight: 12, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{sf.label}</div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{sf.desc}</div>
+                </div>
+                <Toggle
+                  checked={!!(cfg.subfeatures && cfg.subfeatures[sf.key])}
+                  onChange={(v) => {
+                    const nextSub = { ...(cfg.subfeatures || {}), [sf.key]: v };
+                    setCfg({ ...cfg, subfeatures: nextSub });
+                    save({ subfeatures: nextSub });
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <button className="ghost" onClick={runTest}>
+              <span className="mi" style={{ fontSize: 14, verticalAlign: -2, marginRight: 4 }}>cable</span>
+              连接测试
+            </button>
+            {testResult && (
+              <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, fontSize: 12,
+                background: testResult.token_ok ? 'rgba(127,217,168,0.12)' : 'rgba(255,180,171,0.12)',
+                border: `1px solid ${testResult.token_ok ? 'rgba(127,217,168,0.4)' : 'rgba(255,180,171,0.4)'}` }}>
+                {testResult.using_mock && (
+                  <div className="tag warn" style={{ marginBottom: 6 }}>Mock 模式（App ID 未填）</div>
+                )}
+                {testResult.error && <div className="err">{testResult.error}</div>}
+                {testResult.scopes && (
+                  <div className="mono" style={{ lineHeight: 1.8 }}>
+                    {Object.entries(testResult.scopes).map(([k, v]) => (
+                      <div key={k}>
+                        <span style={{ color: v === 'ok' || v === 'mock' ? '#7fd9a8' : '#ffb4ab' }}>{v}</span>
+                        {' · '}{k}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {testResult.security_warning && (
+                  <div className="tag warn" style={{ marginTop: 8 }}>{testResult.security_warning}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [store, { setActive, setProfile }] = useLLMStore();
   const active = store.active;
@@ -84,7 +336,7 @@ export default function Settings() {
   const [msg, setMsg] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [ctxCompress, setCtxCompress] = useState(true);
-  const [streamOutput, setStreamOutput] = useState(false);
+  const [streamOutput, setStreamOutput] = useStreamOutput();
   const [envDiag, setEnvDiag] = useState(null);
   const [checking, setChecking] = useState(false);
 
@@ -338,6 +590,8 @@ export default function Settings() {
                 desc: '运行五阶段分析后，从历史用例反推得到的 InferredKnowledgePoint 进入 Memory 的「反哺审核」队列，人工 accept 后才可合入 KP 库。' },
               { key: 'enable_legacy_inference_auto_accept', label: '反哺候选自动接受（高风险）',
                 desc: '高 confidence 的反哺候选直接合入 KP 库，跳过人工审核。仅当历史质量高度可信时启用。' },
+              { key: 'enable_feishu_integration', label: '飞书集成（总开关）',
+                desc: '打开后，每个项目可在下方「飞书集成」面板单独配置应用凭据、负责人与子功能（导入/导出/通知/IM）。凭据未就绪期间业务走 Mock 客户端，可端到端联调但不会真发请求。' },
             ].map(f => (
               <div key={f.key} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -355,6 +609,10 @@ export default function Settings() {
               </div>
             ))}
           </div>
+
+          <FeishuIntegrationCard
+            globalEnabled={!!(features && features.enable_feishu_integration)}
+          />
 
           <div className="card" style={{ margin: 0 }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

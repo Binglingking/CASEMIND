@@ -8,6 +8,7 @@ from urllib.parse import unquote
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.api.routes import router
 from backend.config import settings
@@ -75,6 +76,36 @@ async def readable_request_log(request: Request, call_next):
     level = logging.INFO if status < 400 else logging.WARNING
     _http_log.log(level, "%s %s -> %d (%.1fms)", request.method, full, status, elapsed)
     return response
+
+
+@app.middleware("http")
+async def project_access_guard(request: Request, call_next):
+    """验证受保护项目的访问权限。仅当请求头包含 X-CaseMind-Project 时生效。"""
+    project = request.headers.get("X-CaseMind-Project", "")
+    if project:
+        project = unquote(project)
+    if not project:
+        return await call_next(request)
+
+    project_key = request.headers.get("X-CaseMind-Key", "")
+    if project_key:
+        project_key = unquote(project_key)
+    from backend.core.project import project_manager
+    meta = project_manager.get_meta(project)
+
+    if meta.get("has_password"):
+        if not project_key:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "此项目需要密码验证，请先输入项目密码"},
+            )
+        if not project_manager.verify_password(project, project_key):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "项目密码错误"},
+            )
+
+    return await call_next(request)
 
 
 app.include_router(router, prefix="/api")

@@ -8,5 +8,6 @@
   "enable_reranker": true,
   "enable_legacy_style_reference": true,
   "enable_legacy_inference": true,
-  "enable_legacy_inference_auto_accept": true
+  "enable_legacy_inference_auto_accept": true,
+  "enable_feishu_integration": false
 }

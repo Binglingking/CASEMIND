@@ -7,6 +7,11 @@ const LS_CHATS = (project) => `casemind.chats.${project}`;
 const LS_ACTIVE_CHAT = (project) => `casemind.chats.${project}.active`;
 const LS_LAST = (project) => `casemind.last.${project}`;
 
+// sessionStorage keys (per-project, cleared when browser closes)
+const SS_PROJECT_KEY = (project) => `casemind.pkey.${project}`;
+// localStorage keys (per-project, persists across sessions)
+const LS_PROJECT_KEY = (project) => `casemind.pkey.${project}`;
+
 export function getProject() {
   return localStorage.getItem(LS_PROJECT) || '';
 }
@@ -22,6 +27,41 @@ export function useProject() {
     return () => window.removeEventListener('casemind:project', h);
   }, []);
   return [p, setProject];
+}
+
+// 改从 localStorage 和 sessionStorage 都获取，优先 localStorage（记住密码）
+
+export function getProjectKey(project) {
+  if (!project) return '';
+  return localStorage.getItem(LS_PROJECT_KEY(project))
+      || sessionStorage.getItem(SS_PROJECT_KEY(project))
+      || '';
+}
+
+export function isProjectKeyRemembered(project) {
+  if (!project) return false;
+  return !!localStorage.getItem(LS_PROJECT_KEY(project));
+}
+
+export function setProjectKey(project, key, remember = false) {
+  if (!project) return;
+  if (key) {
+    if (remember) {
+      localStorage.setItem(LS_PROJECT_KEY(project), key);
+      sessionStorage.removeItem(SS_PROJECT_KEY(project));
+    } else {
+      sessionStorage.setItem(SS_PROJECT_KEY(project), key);
+      localStorage.removeItem(LS_PROJECT_KEY(project));
+    }
+  } else {
+    clearProjectKey(project);
+  }
+}
+
+export function clearProjectKey(project) {
+  if (!project) return;
+  sessionStorage.removeItem(SS_PROJECT_KEY(project));
+  localStorage.removeItem(LS_PROJECT_KEY(project));
 }
 
 // 仅保留 OpenRouter。历史数据如果存的是旧 provider（mimo / custom）或扁平格式，
@@ -161,6 +201,27 @@ export function newChat(mode = 'qa') {
     updatedAt: Date.now(),
     messages: [], // {role: 'user'|'assistant', content, sources?, thinking?}
   };
+}
+
+// --------- stream output preference ---------
+const LS_STREAM = 'casemind.stream_output';
+
+export function getStreamOutput() {
+  const v = localStorage.getItem(LS_STREAM);
+  return v === 'true';
+}
+export function setStreamOutput(val) {
+  localStorage.setItem(LS_STREAM, val ? 'true' : 'false');
+  window.dispatchEvent(new Event('casemind:stream'));
+}
+export function useStreamOutput() {
+  const [v, setV] = useState(() => getStreamOutput());
+  useEffect(() => {
+    const h = () => setV(getStreamOutput());
+    window.addEventListener('casemind:stream', h);
+    return () => window.removeEventListener('casemind:stream', h);
+  }, []);
+  return [v, (val) => { setStreamOutput(val); setV(val); }];
 }
 
 // --------- last results (per project) ---------

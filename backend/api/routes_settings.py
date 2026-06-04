@@ -61,6 +61,7 @@ class FeaturesUpdateBody(BaseModel):
     enable_legacy_style_reference: bool | None = None
     enable_legacy_inference: bool | None = None
     enable_legacy_inference_auto_accept: bool | None = None
+    enable_feishu_integration: bool | None = None
 
 
 @router.get("/features")

@@ -315,7 +315,7 @@ def _single_rank(hits: list[tuple[int, float]]) -> list[tuple[int, dict]]:
     out: list[tuple[int, dict]] = []
     for rank, (idx, s) in enumerate(hits):
         out.append((idx, {
-            "vector": float(s) if rank == rank else 0.0,  # 保留原分
+            "vector": float(s) if s == s else 0.0,  # NaN → 0
             "bm25": 0.0,
             "rrf": 1.0 / (RRF_K + rank + 1),
             "vector_rank": rank,

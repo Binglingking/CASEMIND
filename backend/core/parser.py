@@ -42,11 +42,15 @@ def _parse_docx(path: Path) -> str:
     for p in doc.paragraphs:
         if p.text.strip():
             blocks.append(p.text)
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [c.text.strip() for c in row.cells if c.text.strip()]
-            if cells:
-                blocks.append(" | ".join(cells))
+    # 表格可能存在格式异常（如缺少 <w:tblGrid>），捕获异常避免整篇文档被丢弃
+    try:
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    blocks.append(" | ".join(cells))
+    except Exception:
+        pass
     return "\n".join(blocks)
 
 

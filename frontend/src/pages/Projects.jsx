@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { useProject } from '../store.js';
+import { useProject, getProjectKey, isProjectKeyRemembered, setProjectKey, clearProjectKey } from '../store.js';
 
 function Toast({ msg, onDone }) {
   useEffect(() => {
@@ -36,6 +36,17 @@ export default function Projects() {
   const [current, setCurrent] = useProject();
   const [busyDelete, setBusyDelete] = useState(null);
 
+  // 密码弹窗状态
+  const [lockTarget, setLockTarget] = useState(null);
+  const [lockPassword, setLockPassword] = useState('');
+  const [lockOwner, setLockOwner] = useState('');
+  const [lockBusy, setLockBusy] = useState(false);
+  const [lockErr, setLockErr] = useState('');
+  const [lockRemember, setLockRemember] = useState(false);
+  const [changePwdMode, setChangePwdMode] = useState(false);
+  const [lockOldPassword, setLockOldPassword] = useState('');
+  const [lockNewPassword, setLockNewPassword] = useState('');
+
   async function refresh() {
     setErr('');
     try {
@@ -65,8 +76,65 @@ export default function Projects() {
 
   function handleSwitch(pName) {
     if (pName === current) return;
-    setCurrent(pName);
-    setToast(`已切换到：${pName}`);
+    const proj = list.find(p => p.name === pName);
+    if (!proj) return;
+    const remembered = getProjectKey(proj.name);
+    setLockTarget({
+      name: proj.name,
+      has_password: proj.has_password,
+      owner: proj.owner || '',
+    });
+    setLockPassword(remembered);
+    setLockOwner('');
+    setLockErr('');
+    setLockRemember(isProjectKeyRemembered(proj.name));
+    setChangePwdMode(false);
+    setLockOldPassword('');
+    setLockNewPassword('');
+  }
+
+  async function handleUnlock() {
+    if (!lockTarget) return;
+    setLockBusy(true);
+    setLockErr('');
+    try {
+      if (lockTarget.has_password) {
+        await api.unlockProject(lockTarget.name, lockPassword);
+      } else {
+        if (!lockOwner.trim()) { setLockErr('请输入所有者姓名'); setLockBusy(false); return; }
+        if (lockPassword.length < 4) { setLockErr('密码至少需要4个字符'); setLockBusy(false); return; }
+        await api.setProjectPassword(lockTarget.name, lockOwner.trim(), lockPassword);
+      }
+      setProjectKey(lockTarget.name, lockPassword, lockRemember);
+      setCurrent(lockTarget.name);
+      setToast(`已切换到：${lockTarget.name}`);
+      setLockTarget(null);
+      await refresh();
+    } catch (e) {
+      setLockErr(String(e.message || e));
+    }
+    setLockBusy(false);
+  }
+
+  async function handleChangePassword() {
+    if (!lockTarget) return;
+    setLockBusy(true);
+    setLockErr('');
+    try {
+      if (!lockOldPassword) { setLockErr('请输入原密码'); setLockBusy(false); return; }
+      if (lockNewPassword.length < 4) { setLockErr('新密码至少需要4个字符'); setLockBusy(false); return; }
+      await api.changeProjectPassword(lockTarget.name, lockOldPassword, lockNewPassword);
+      // 更新存储的密码
+      setProjectKey(lockTarget.name, lockNewPassword, lockRemember);
+      // 自动进入项目
+      setCurrent(lockTarget.name);
+      setToast(`密码已修改，已切换到：${lockTarget.name}`);
+      setLockTarget(null);
+      await refresh();
+    } catch (e) {
+      setLockErr(String(e.message || e));
+    }
+    setLockBusy(false);
   }
 
   async function handleDelete(e, pName) {
@@ -104,7 +172,7 @@ export default function Projects() {
       <div
         key={p.name}
         className={`proj-card ${isActive ? 'active' : ''}`}
-        onClick={() => handleSwitch(p.name)}
+        onClick={() => { if (!isActive) handleSwitch(p.name); }}
         style={isActive ? {
           borderColor: 'rgba(207,188,255,0.6)',
           boxShadow: '0 0 24px rgba(103,80,164,0.25)',
@@ -128,8 +196,8 @@ export default function Projects() {
           </button>
         )}
         <div className="proj-icon">
-          <span className="mi" style={{ color: isUserCreated ? '#cfbcff' : '#948e9c' }}>
-            {isUserCreated ? 'folder_special' : 'folder_open'}
+          <span className="mi" style={{ color: p.has_password ? '#e7c365' : isUserCreated ? '#cfbcff' : '#948e9c' }}>
+            {p.has_password ? 'lock' : isUserCreated ? 'folder_special' : 'folder_open'}
           </span>
         </div>
         {isActive && <span className="tag ok" style={{ position: 'absolute', top: 14, right: isUserCreated ? 42 : 14, zIndex: 1 }}>当前</span>}
@@ -139,9 +207,12 @@ export default function Projects() {
             background: 'rgba(148,142,156,0.12)', color: '#948e9c',
           }}>自动发现</span>
         )}
-        <div className="proj-name">{p.name}</div>
+        <div className="proj-name">
+          {p.has_password && <span className="mi" style={{ fontSize: 14, color: '#e7c365', marginRight: 6, verticalAlign: -2 }}>lock</span>}
+          {p.name}
+        </div>
         <div className="proj-sub">
-          {isUserCreated
+          {p.owner ? `👤 ${p.owner}` : isUserCreated
             ? (folders > 0 ? `${folders} 个已登记目录` : '暂未添加目录')
             : '代码自动扫描发现'}
         </div>
@@ -301,6 +372,185 @@ export default function Projects() {
             <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
               <button className="ghost" onClick={() => setShowModal(false)}>取消</button>
               <button className="primary" onClick={createProject}>创建</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 密码验证 / 首次设置弹窗 */}
+      {lockTarget && !changePwdMode && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,13,19,0.7)',
+            backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 60,
+          }}
+          onClick={() => setLockTarget(null)}
+        >
+          <div
+            className="card"
+            style={{ width: 420, margin: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="mi" style={{ color: '#e7c365' }}>
+                {lockTarget.has_password ? 'lock' : 'lock_open'}
+              </span>
+              {lockTarget.has_password ? '验证项目密码' : '首次设置项目密码'}
+            </h2>
+            <p style={{ color: '#b5afbd', fontSize: 13, marginBottom: 16 }}>
+              {lockTarget.has_password
+                ? `项目「${lockTarget.name}」已加密，请输入密码进入。`
+                : `项目「${lockTarget.name}」尚未设置访问密码，请设置所有者姓名和密码以保护数据。`}
+            </p>
+
+            {!lockTarget.has_password && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 12, color: '#948e9c', marginBottom: 4 }}>
+                  所有者姓名
+                </label>
+                <input
+                  type="text"
+                  placeholder="输入你的姓名"
+                  value={lockOwner}
+                  onChange={e => setLockOwner(e.target.value)}
+                  style={{ width: '100%' }}
+                  autoFocus
+                />
+              </div>
+            )}
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', fontSize: 12, color: '#948e9c', marginBottom: 4 }}>
+                项目密码
+              </label>
+              <input
+                type="password"
+                placeholder={lockTarget.has_password ? '输入项目密码' : '设置密码（至少4位）'}
+                value={lockPassword}
+                onChange={e => setLockPassword(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleUnlock(); }}
+                style={{ width: '100%' }}
+                autoFocus={!!lockTarget.has_password}
+              />
+            </div>
+
+            {lockTarget.has_password && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 13, color: '#948e9c', cursor: 'pointer', userSelect: 'none',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={lockRemember}
+                    onChange={e => setLockRemember(e.target.checked)}
+                    style={{ accentColor: '#cfbcff', width: 14, height: 14, cursor: 'pointer' }}
+                  />
+                  记住密码
+                </label>
+                <button
+                  className="ghost"
+                  style={{ fontSize: 12, padding: '4px 8px', color: '#cfbcff' }}
+                  onClick={() => {
+                    setChangePwdMode(true);
+                    setLockOldPassword('');
+                    setLockNewPassword('');
+                    setLockErr('');
+                  }}
+                >
+                  <span className="mi" style={{ fontSize: 14, verticalAlign: -3, marginRight: 4 }}>lock_reset</span>
+                  修改密码
+                </button>
+              </div>
+            )}
+
+            {lockErr && (
+              <div style={{ color: '#ffb4ab', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="mi" style={{ fontSize: 14 }}>error</span>
+                {lockErr}
+              </div>
+            )}
+
+            <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+              <button className="ghost" onClick={() => setLockTarget(null)}>取消</button>
+              <button
+                className="primary"
+                onClick={handleUnlock}
+                disabled={lockBusy || !lockPassword}
+              >
+                {lockBusy ? '验证中...' : lockTarget.has_password ? '解锁进入' : '设置并进入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 修改密码弹窗 */}
+      {lockTarget && changePwdMode && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,13,19,0.7)',
+            backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 61,
+          }}
+          onClick={() => { setChangePwdMode(false); setLockErr(''); }}
+        >
+          <div
+            className="card"
+            style={{ width: 420, margin: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="mi" style={{ color: '#e7c365' }}>lock_reset</span>
+              修改项目密码
+            </h2>
+            <p style={{ color: '#b5afbd', fontSize: 13, marginBottom: 16 }}>
+              修改项目「{lockTarget.name}」的访问密码。
+            </p>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 12, color: '#948e9c', marginBottom: 4 }}>
+                原密码
+              </label>
+              <input
+                type="password"
+                placeholder="输入当前密码"
+                value={lockOldPassword}
+                onChange={e => setLockOldPassword(e.target.value)}
+                style={{ width: '100%' }}
+                autoFocus
+              />
+            </div>
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', fontSize: 12, color: '#948e9c', marginBottom: 4 }}>
+                新密码
+              </label>
+              <input
+                type="password"
+                placeholder="设置新密码（至少4位）"
+                value={lockNewPassword}
+                onChange={e => setLockNewPassword(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleChangePassword(); }}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            {lockErr && (
+              <div style={{ color: '#ffb4ab', fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className="mi" style={{ fontSize: 14 }}>error</span>
+                {lockErr}
+              </div>
+            )}
+
+            <div className="row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+              <button className="ghost" onClick={() => { setChangePwdMode(false); setLockErr(''); }}>返回</button>
+              <button
+                className="primary"
+                onClick={handleChangePassword}
+                disabled={lockBusy || !lockOldPassword || !lockNewPassword}
+              >
+                {lockBusy ? '修改中...' : '确认修改'}
+              </button>
             </div>
           </div>
         </div>

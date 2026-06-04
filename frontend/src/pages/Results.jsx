@@ -20,8 +20,9 @@ function formatTime(ts) {
 }
 
 function OutputRow({ project, item, onRefresh, onPreview }) {
-  const icon = item.kind === 'testcase' ? 'fact_check' : 'account_tree';
-  const iconColor = item.kind === 'testcase' ? '#cfbcff' : '#e7c365';
+  const icon = item.kind === 'testcase' ? 'fact_check' : item.kind === 'xmind' ? 'account_tree' : 'picture_as_pdf';
+  const iconColor = item.kind === 'testcase' ? '#cfbcff' : item.kind === 'xmind' ? '#e7c365' : '#ffb4ab';
+  const typeLabel = item.kind === 'testcase' ? 'TESTCASE' : item.kind === 'xmind' ? 'XMIND' : 'REQ PDF';
 
   async function handleDownloadSource(e) {
     e.stopPropagation();
@@ -47,53 +48,18 @@ function OutputRow({ project, item, onRefresh, onPreview }) {
   async function handleDownloadMarkdown(e) {
     e.stopPropagation();
     try {
-      const data = await api.getOutputContent(project, item.kind, item.name);
-      if (!data?.markdown) { alert('没有 Markdown 内容'); return; }
-      const blob = new Blob([data.markdown], { type: 'text/markdown' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = item.name; a.click();
-      URL.revokeObjectURL(url);
+      await api.downloadOutput(project, item.kind, item.name);
     } catch (ex) { alert(String(ex.message || ex)); }
   }
 
-  function handleExportExcel(e) {
+  async function handleExportExcel(e) {
     e.stopPropagation();
-    fetch('/api/outputs/export-excel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project, kind: item.kind, filename: item.name }),
-    })
-      .then(resp => {
-        if (!resp.ok) {
-          return resp.text().then(text => {
-            let msg = '导出失败';
-            try { 
-              const d = JSON.parse(text); 
-              msg = d.detail || d.message || msg; 
-            } catch (e) {
-              msg = text || msg;
-            }
-            throw new Error(msg);
-          });
-        }
-        return resp.blob();
-      })
-      .then(blob => {
-        if (!blob || blob.size === 0) {
-          throw new Error('导出的文件为空');
-        }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = item.name.replace(/\.[^.]+$/, '.xlsx');
-        a.click();
-        URL.revokeObjectURL(url);
-      })
-      .catch(err => {
-        console.error('Excel导出错误:', err);
-        alert(`导出失败: ${err.message || err}`);
-      });
+    try {
+      await api.exportOutputExcel(project, item.kind, item.name);
+    } catch (err) {
+      console.error('Excel导出错误:', err);
+      alert(`导出失败: ${err.message || err}`);
+    }
   }
 
   async function handleRename(e) {
@@ -133,7 +99,7 @@ function OutputRow({ project, item, onRefresh, onPreview }) {
       <div style={{ color: '#b5afbd', fontSize: 12.5 }}>{formatTime(item.mtime)}</div>
       <div>
         <span className="tag info mono">
-          {item.kind === 'testcase' ? 'TESTCASE' : 'XMIND'}
+          {typeLabel}
         </span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
@@ -149,6 +115,11 @@ function OutputRow({ project, item, onRefresh, onPreview }) {
         )}
         {item.kind === 'xmind' && (
           <button className="icon-btn" onClick={handleDownloadMarkdown} title="导出 Markdown">
+            <span className="mi" style={{ fontSize: 14 }}>download</span>
+          </button>
+        )}
+        {item.kind === 'req_analysis' && (
+          <button className="icon-btn" onClick={handleDownloadMarkdown} title="下载 PDF">
             <span className="mi" style={{ fontSize: 14 }}>download</span>
           </button>
         )}
@@ -168,6 +139,8 @@ export default function Results() {
   const [items, setItems] = useState([]);
   const [err, setErr] = useState('');
   const [filter, setFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [previewItem, setPreviewItem] = useState(null);
   const [previewContent, setPreviewContent] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -183,6 +156,7 @@ export default function Results() {
   }
 
   useEffect(() => { refresh(); }, [project]);
+  useEffect(() => { setPage(1); }, [filter, project, pageSize]);
 
   async function openPreview(item) {
     setPreviewItem(item);
@@ -212,6 +186,12 @@ export default function Results() {
   const filtered = filter === 'all' ? items : items.filter(i => i.kind === filter);
   const tcCount = items.filter(i => i.kind === 'testcase').length;
   const xmCount = items.filter(i => i.kind === 'xmind').length;
+  const reqCount = items.filter(i => i.kind === 'req_analysis').length;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const pageEnd = Math.min(currentPage * pageSize, filtered.length);
+  const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div>
@@ -229,6 +209,9 @@ export default function Results() {
           </button>
           <button className={filter === 'xmind' ? 'active' : ''} onClick={() => setFilter('xmind')}>
             XMind ({xmCount})
+          </button>
+          <button className={filter === 'req_analysis' ? 'active' : ''} onClick={() => setFilter('req_analysis')}>
+            需求分析 ({reqCount})
           </button>
         </div>
       </div>
@@ -253,7 +236,7 @@ export default function Results() {
             <div>类型</div>
             <div></div>
           </div>
-          {filtered.map(item => (
+          {paged.map(item => (
             <OutputRow
               key={`${item.kind}/${item.name}`}
               project={project}
@@ -265,8 +248,29 @@ export default function Results() {
           <div style={{
             padding: '10px 16px', borderTop: '1px solid #211f24',
             color: '#948e9c', fontSize: 12, fontFamily: '"Space Grotesk", monospace',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
           }}>
-            合计 {items.length} 个文件 · 测试用例 {tcCount} · XMind {xmCount}
+            <span>
+              合计 {items.length} 个文件 · 测试用例 {tcCount} · XMind {xmCount} · 需求分析 {reqCount}
+              {filtered.length > 0 && <> · 当前 {pageStart}-{pageEnd} / {filtered.length}</>}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>每页</span>
+              <select
+                value={pageSize}
+                onChange={e => setPageSize(Number(e.target.value))}
+                style={{ width: 72 }}
+              >
+                {[10, 20, 50].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <button className="ghost" disabled={currentPage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+                上一页
+              </button>
+              <span>{currentPage} / {totalPages}</span>
+              <button className="ghost" disabled={currentPage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
+                下一页
+              </button>
+            </span>
           </div>
         </div>
       )}
@@ -298,8 +302,8 @@ export default function Results() {
               display: 'flex', alignItems: 'center',
               padding: '14px 20px', borderBottom: '1px solid #2d2b33', gap: 8,
             }}>
-              <span className="mi" style={{ color: previewItem.kind === 'testcase' ? '#cfbcff' : '#e7c365' }}>
-                {previewItem.kind === 'testcase' ? 'fact_check' : 'account_tree'}
+              <span className="mi" style={{ color: previewItem.kind === 'testcase' ? '#cfbcff' : previewItem.kind === 'xmind' ? '#e7c365' : '#ffb4ab' }}>
+                {previewItem.kind === 'testcase' ? 'fact_check' : previewItem.kind === 'xmind' ? 'account_tree' : 'picture_as_pdf'}
               </span>
               <span style={{
                 flex: 1, fontWeight: 600, fontSize: 14, color: '#e6e0e9',
@@ -321,6 +325,23 @@ export default function Results() {
                   )}
                   {previewItem.kind === 'xmind' && (
                     <XMindTree markdown={previewContent.markdown || ''} />
+                  )}
+                  {previewItem.kind === 'req_analysis' && (
+                    <div style={{ textAlign: 'center', padding: 32 }}>
+                      <span className="mi" style={{ fontSize: 42, color: '#ffb4ab' }}>picture_as_pdf</span>
+                      <h3 style={{ marginTop: 12, marginBottom: 8 }}>需求分析 PDF</h3>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {formatSize(previewContent.size)} · {formatTime(previewContent.mtime)}
+                      </p>
+                      <button
+                        className="primary"
+                        style={{ marginTop: 16 }}
+                        onClick={() => api.downloadOutput(project, 'req_analysis', previewItem.name).catch(e => alert(String(e.message || e)))}
+                      >
+                        <span className="mi" style={{ fontSize: 16, verticalAlign: -3, marginRight: 4 }}>download</span>
+                        下载 PDF
+                      </button>
+                    </div>
                   )}
                   {previewContent.truncated && (
                     <p className="muted" style={{ marginTop: 8 }}>

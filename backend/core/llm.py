@@ -222,6 +222,88 @@ def chat(messages: list[dict], cfg: LLMConfig, temperature: float = 0.2,
     return content
 
 
+def chat_stream(messages: list[dict], cfg: LLMConfig,
+                temperature: float = 0.2, json_mode: bool = False,
+                timeout: float = 180.0):
+    """流式调用 LLM，逐 chunk yield (event_type, text)。
+
+    event_type:
+      - 'thinking'  : 模型 reasoning/thinking 内容
+      - 'answer'    : 模型正文内容
+      - 'error'     : 错误信息
+      - 'done'      : 流结束信号
+    """
+    if not cfg.api_key:
+        yield ('error', 'LLM API Key 未配置')
+        return
+    if not cfg.base_url:
+        yield ('error', 'LLM Base URL 未配置')
+        return
+
+    url = f"{cfg.base_url}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {cfg.api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "HTTP-Referer": "https://casemind.local",
+        "X-Title": "CaseMind",
+    }
+    payload: dict = {
+        "model": cfg.model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            with client.stream("POST", url, json=payload, headers=headers) as r:
+                if r.status_code >= 400:
+                    body_snippet = ""
+                    try:
+                        body_snippet = r.read().decode("utf-8", errors="replace")[:500]
+                    except Exception:
+                        pass
+                    yield ('error', f"LLM 调用失败 [HTTP {r.status_code}]：{body_snippet}")
+                    return
+
+                for line in r.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        yield ('done', '')
+                        return
+                    try:
+                        chunk = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+
+                    # DeepSeek / OpenRouter: reasoning_content 即思考过程
+                    reasoning = delta.get("reasoning_content") or ""
+                    if reasoning:
+                        yield ('thinking', reasoning)
+
+                    # 正文内容
+                    content = delta.get("content") or ""
+                    if content:
+                        yield ('answer', content)
+
+                yield ('done', '')
+
+    except httpx.TimeoutException:
+        yield ('error', f"LLM 请求超时（{timeout}s）")
+    except httpx.RequestError as e:
+        yield ('error', f"LLM 请求网络错误：{e}")
+
+
 def try_parse_json(raw: str):
     """Best-effort JSON parse for model output (may contain fences / prose)."""
     if not raw:
