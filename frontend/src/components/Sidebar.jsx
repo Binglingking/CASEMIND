@@ -59,7 +59,7 @@ export default function Sidebar() {
         <div className="brand-icon">∞</div>
         <div>
           <div className="brand-title">CASEMIND</div>
-          <div className="brand-sub">AI 记忆中枢</div>
+          <div className="brand-sub">智能用例平台</div>
         </div>
       </div>
 
